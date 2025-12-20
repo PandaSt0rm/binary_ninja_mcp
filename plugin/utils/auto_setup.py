@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from typing import Optional
+from binary_ninja_mcp.config import build_mcp_server_config, resolve_server_url, SERVER_NAME
 from .python_detection import get_python_executable, create_venv_with_system_python, copy_python_env
 
 
@@ -30,6 +31,14 @@ def _venv_python() -> str:
         py = os.path.join(d, "Scripts", "python.exe")
         return py
     return os.path.join(d, "bin", "python3")
+
+
+def _prefer_uv() -> bool:
+    return os.environ.get("BINARY_NINJA_MCP_NO_UV", "").lower() not in ("1", "true", "yes")
+
+
+def _dev_mode() -> bool:
+    return os.environ.get("BINARY_NINJA_MCP_DEV", "").lower() in ("1", "true", "yes")
 
 
 def _ensure_local_venv() -> str:
@@ -92,7 +101,7 @@ def install_mcp_clients(quiet: bool = True) -> int:
     re-running on every Binary Ninja start.
     """
     sentinel = _sentinel_path()
-    server_key = "binary_ninja_mcp"
+    server_key = SERVER_NAME
     if os.path.exists(sentinel):
         # If sentinel exists but no client has our key yet, proceed anyway
         try:
@@ -120,8 +129,10 @@ def install_mcp_clients(quiet: bool = True) -> int:
     env: dict[str, str] = {}
     copy_python_env(env)
     bridge = _bridge_entrypoint()
-    # Prefer local venv python for bridge execution
     command = _ensure_local_venv()
+    server_url = resolve_server_url()
+    prefer_uv = _prefer_uv()
+    dev_mode = _dev_mode()
 
     modified = 0
     for _name, (config_dir, config_file) in targets.items():
@@ -141,27 +152,30 @@ def install_mcp_clients(quiet: bool = True) -> int:
         config.setdefault("mcpServers", {})
         servers = config["mcpServers"]
 
-        # If a legacy key exists, copy into new key without removing legacy
         legacy_key = "binary_ninja_mcp_max"
-        if legacy_key in servers and server_key not in servers:
+        existing_env = {}
+        try:
+            existing_env.update(servers.get(server_key, {}).get("env", {}))
+        except Exception:
+            existing_env = {}
+        if legacy_key in servers:
             try:
-                legacy_cfg = dict(servers[legacy_key])
-                # merge env
-                if env:
-                    merged_env = dict(legacy_cfg.get("env", {}))
-                    merged_env.update(env)
-                    legacy_cfg["env"] = merged_env
-                servers[server_key] = legacy_cfg
+                existing_env.update(servers[legacy_key].get("env", {}))
             except Exception:
                 pass
-        else:
-            servers[server_key] = {
-                "command": command,
-                "args": [bridge],
-                "timeout": 1800,
-                "disabled": False,
-                **({"env": env} if env else {}),
-            }
+
+        merged_env = dict(env)
+        merged_env.update(existing_env)
+
+        servers[server_key] = build_mcp_server_config(
+            prefer_uv=prefer_uv,
+            dev=dev_mode,
+            repo_root=_repo_root(),
+            server_url=server_url,
+            env=merged_env,
+            fallback_command=command,
+            fallback_args=[bridge],
+        )
 
         try:
             with open(config_path, "w", encoding="utf-8") as f:

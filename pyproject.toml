@@ -1,0 +1,39 @@
+[project]
+name = "binary-ninja-mcp"
+version = "1.0.1"
+description = "Binary Ninja MCP bridge and tooling"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "fosdickio" },
+    { name = "CX330Blake" },
+]
+keywords = ["binaryninja", "mcp", "llm", "reverse-engineering"]
+dependencies = [
+    "anthropic>=0.49.0",
+    "mcp[cli]>=1.6.0",
+    "requests>=2.32.3",
+]
+
+[project.urls]
+Repository = "https://github.com/fosdickio/binary_ninja_mcp"
+Issues = "https://github.com/fosdickio/binary_ninja_mcp/issues"
+
+[project.scripts]
+binary-ninja-mcp = "binary_ninja_mcp.bridge.binja_mcp_bridge:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"binary_ninja_mcp" = "."}
+packages = [
+    "binary_ninja_mcp",
+    "binary_ninja_mcp.bridge",
+    "binary_ninja_mcp.plugin",
+    "binary_ninja_mcp.plugin.api",
+    "binary_ninja_mcp.plugin.core",
+    "binary_ninja_mcp.plugin.server",
+    "binary_ninja_mcp.plugin.utils",
+]

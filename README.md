@@ -72,20 +72,38 @@ python scripts/mcp_client_installer.py --uninstall  # remove entries and delete 
 python scripts/mcp_client_installer.py --config     # print a generic JSON config snippet
 ```
 
+If you prefer a zero-setup bridge, run it straight from git with uvx:
+
+```bash
+uvx --from git+https://github.com/fosdickio/binary_ninja_mcp binary-ninja-mcp
+```
+
+Working from a local editable checkout? Use uv run so your changes are picked up:
+
+```bash
+uv run binary-ninja-mcp -- --host localhost --port 9009
+```
+
+You can also emit a ready-to-paste MCP config with `binary-ninja-mcp --config` (add `--dev` to use `uv run`).
+
 For other MCP clients, this is an example config:
 
 ```json
 {
     "mcpServers": {
         "binary_ninja_mcp": {
-            "command": "/ABSOLUTE/PATH/TO/Binary Ninja/plugins/repositories/community/plugins/fosdickio_binary_ninja_mcp/.venv/bin/python",
+            "command": "uvx",
             "args": [
-                "/ABSOLUTE/PATH/TO/Binary Ninja/plugins/repositories/community/plugins/fosdickio_binary_ninja_mcp/bridge/binja_mcp_bridge.py"
+                "--from",
+                "git+https://github.com/fosdickio/binary_ninja_mcp",
+                "binary-ninja-mcp"
             ]
         }
     }
 }
 ```
+
+The bridge honors `BINARY_NINJA_MCP_URL` (or `BINARY_NINJA_MCP_HOST` / `BINARY_NINJA_MCP_PORT`) if you need to point at a non-default Binary Ninja server.
 
 Note: Replace `/ABSOLUTE/PATH/TO` with the actual absolute path to your project directory. The virtual environment's Python interpreter must be used to access the installed dependencies.
 

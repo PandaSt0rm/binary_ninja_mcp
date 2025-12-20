@@ -7,15 +7,24 @@ from typing import Optional, Dict
 # Import shared utilities
 try:
     # Try relative import first (when run as module)
-    from ..plugin.utils.python_detection import get_python_executable, create_venv_with_system_python, copy_python_env
+    from ..plugin.utils.python_detection import (
+        get_python_executable,
+        create_venv_with_system_python,
+        copy_python_env,
+    )
 except ImportError:
     # Fallback for direct script execution
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "plugin"))
     from utils.python_detection import get_python_executable, create_venv_with_system_python, copy_python_env
 
+try:
+    from ..config import build_mcp_server_config, resolve_server_url, SERVER_NAME
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from config import build_mcp_server_config, resolve_server_url, SERVER_NAME
 
-# Unique key used in MCP client configs
-MCP_SERVER_KEY = "binary_ninja_mcp"
+
+MCP_SERVER_KEY = SERVER_NAME
 
 
 def _repo_root() -> str:
@@ -57,19 +66,20 @@ def ensure_local_venv() -> str:
 # Note: get_python_executable and copy_python_env are now imported from utils.python_detection
 
 
-def print_mcp_config():
+def print_mcp_config(*, prefer_uv: bool = True, dev: bool = False, server_url: str | None = None):
     """Print a generic MCP config snippet users can copy to unsupported clients."""
-    mcp_config = {
-        "command": ensure_local_venv(),
-        "args": [
-            _bridge_entrypoint(),
-        ],
-        "timeout": 1800,
-        "disabled": False,
-    }
-    env = {}
-    if copy_python_env(env):
-        mcp_config["env"] = env
+    env: Dict[str, str] = {}
+    copy_python_env(env)
+    python = ensure_local_venv()
+    mcp_config = build_mcp_server_config(
+        prefer_uv=prefer_uv,
+        dev=dev,
+        repo_root=_repo_root(),
+        server_url=server_url,
+        env=env,
+        fallback_command=python,
+        fallback_args=[_bridge_entrypoint()],
+    )
     print(json.dumps({"mcpServers": {MCP_SERVER_KEY: mcp_config}}, indent=2))
 
 
@@ -114,12 +124,21 @@ def _config_targets() -> dict[str, tuple[str, str]]:
         return {}
 
 
-def install_mcp_servers(*, uninstall: bool = False, quiet: bool = False, env: Optional[Dict[str, str]] = None) -> int:
+def install_mcp_servers(
+    *,
+    uninstall: bool = False,
+    quiet: bool = False,
+    env: Optional[Dict[str, str]] = None,
+    prefer_uv: bool = True,
+    dev: bool = False,
+    server_url: str | None = None,
+) -> int:
     """Install or remove MCP server entries for supported clients.
 
     Returns the number of configs modified.
     """
     env = {} if env is None else dict(env)
+    server_url = resolve_server_url(server_url)
     targets = _config_targets()
     if not targets:
         if not quiet:
@@ -161,20 +180,22 @@ def install_mcp_servers(*, uninstall: bool = False, quiet: bool = False, env: Op
             # Preserve any existing env overrides for this server
             if MCP_SERVER_KEY in mcp_servers:
                 for key, value in mcp_servers[MCP_SERVER_KEY].get("env", {}).items():
-                    env[key] = value
+                    env.setdefault(key, value)
 
             bridge = _bridge_entrypoint()
             if copy_python_env(env) and not quiet:
                 print("[WARNING] Custom Python environment variables detected")
 
-            server_cfg = {
-                "command": ensure_local_venv(),
-                "args": [bridge],
-                "timeout": 1800,
-                "disabled": False,
-            }
-            if env:
-                server_cfg["env"] = env
+            python = ensure_local_venv()
+            server_cfg = build_mcp_server_config(
+                prefer_uv=prefer_uv,
+                dev=dev,
+                repo_root=_repo_root(),
+                server_url=server_url,
+                env=env,
+                fallback_command=python,
+                fallback_args=[bridge],
+            )
             mcp_servers[MCP_SERVER_KEY] = server_cfg
 
         # Write back
@@ -188,7 +209,7 @@ def install_mcp_servers(*, uninstall: bool = False, quiet: bool = False, env: Op
 
     if not uninstall and installed == 0 and not quiet:
         print("No MCP servers installed. For unsupported MCP clients, use the following config:\n")
-        print_mcp_config()
+        print_mcp_config(prefer_uv=prefer_uv, dev=dev, server_url=server_url)
 
     return installed
 
@@ -199,14 +220,22 @@ def main():
     parser.add_argument("--uninstall", action="store_true", help="Remove MCP server entries from supported clients")
     parser.add_argument("--config", action="store_true", help="Print generic MCP config JSON")
     parser.add_argument("--quiet", action="store_true", help="Reduce output noise")
+    parser.add_argument("--dev", action="store_true", help="Use 'uv run' from the repo root for MCP config")
+    parser.add_argument("--no-uv", action="store_true", help="Disable uv/uvx preference in generated configs")
+    parser.add_argument("--server", help="Binary Ninja MCP HTTP server URL")
+    parser.add_argument("--host", help="Binary Ninja MCP HTTP server host")
+    parser.add_argument("--port", type=int, help="Binary Ninja MCP HTTP server port")
     args = parser.parse_args()
+
+    prefer_uv = not args.no_uv
+    server_url = resolve_server_url(args.server, args.host, args.port)
 
     if args.install and args.uninstall:
         print("Cannot install and uninstall at the same time")
         return
 
     if args.config:
-        print_mcp_config()
+        print_mcp_config(prefer_uv=prefer_uv, dev=args.dev, server_url=server_url)
         return
 
     if args.uninstall:
@@ -226,7 +255,12 @@ def main():
 
     # Default action is install if no flag is provided
     if args.install or (not args.uninstall and not args.config):
-        install_mcp_servers(quiet=args.quiet)
+        install_mcp_servers(
+            quiet=args.quiet,
+            prefer_uv=prefer_uv,
+            dev=args.dev,
+            server_url=server_url,
+        )
 
 
 if __name__ == "__main__":

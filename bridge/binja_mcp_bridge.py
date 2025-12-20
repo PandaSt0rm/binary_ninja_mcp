@@ -1,6 +1,8 @@
-import os as _os
 import sys as _sys
 import traceback as _tb
+import argparse as _argparse
+import json as _json
+from pathlib import Path as _Path
 
 # Install a very-early excepthook so any ImportError at module import time is captured.
 def _bridge_excepthook(exc_type, exc, tb):
@@ -12,9 +14,26 @@ _sys.excepthook = _bridge_excepthook
 from mcp.server.fastmcp import FastMCP
 import requests
 
+try:
+    from binary_ninja_mcp.config import (
+        SERVER_NAME,
+        build_mcp_server_config,
+        resolve_server_url,
+    )
+except Exception:
+    _here = _Path(__file__).resolve().parent
+    _root = _here.parent
+    if str(_root) not in _sys.path:
+        _sys.path.insert(0, str(_root))
+    from config import SERVER_NAME, build_mcp_server_config, resolve_server_url
 
-binja_server_url = "http://localhost:9009"
+binja_server_url = resolve_server_url()
 mcp = FastMCP("binja-mcp")
+
+
+def _set_server_url(url: str):
+    global binja_server_url
+    binja_server_url = url
 
 def _active_filename() -> str:
     """Return the currently active filename as known by the server."""
@@ -806,19 +825,19 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> str:
     - data: Hex string of bytes to write (e.g., "90 90" or "9090" or "0x90 0x90")
     - save_to_file: If True (default), save patched binary to disk and re-sign on macOS.
                     If False, only modify in memory without affecting the original file.
-    
+
     Returns status with original and patched bytes.
     On macOS, automatically re-signs the binary after patching to avoid execution errors.
     """
     # Handle boolean type conversion (MCP may pass as string)
     if isinstance(save_to_file, str):
         save_to_file = save_to_file.lower() not in ("false", "0", "no")
-    
+
     params = {"address": address, "data": data, "save_to_file": save_to_file}
     result = get_json("patch", params)
     if not result:
         return "Error: no response"
-    
+
     status = result.get("status") if isinstance(result, dict) else None
     if status in ("ok", "partial"):
         orig = result.get("original_bytes", "")
@@ -831,7 +850,7 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> str:
         save_error = result.get("save_error", "")
         codesign = result.get("codesign", {})
         warning = result.get("warning", "")
-        
+
         msg = f"Patched {written}/{requested} bytes at {addr}"
         if status == "partial":
             msg += " (PARTIAL WRITE)"
@@ -845,25 +864,58 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> str:
             msg += f"\nSaved to file: {saved_path}"
         elif save_error:
             msg += f"\nWarning: File not saved - {save_error}"
-        
+
         # Show codesign status for macOS
         if codesign:
             if codesign.get("success"):
                 msg += f"\nCode signing: {codesign.get('message', 'Re-signed successfully')}"
             elif codesign.get("attempted"):
                 msg += f"\nCode signing: Failed - {codesign.get('error', 'Unknown error')}"
-        
+
         return msg
     if isinstance(result, dict) and "error" in result:
         return f"Error: {result['error']}"
     return str(result)
-    
-if __name__ == "__main__":
-    # Important: write any logs to stderr to avoid corrupting MCP stdio JSON-RPC
-    print("Starting MCP bridge service...", file=_sys.stderr)
+
+
+def _config_json(prefer_uv: bool, dev: bool, server_url: str) -> str:
+    cfg = build_mcp_server_config(
+        prefer_uv=prefer_uv,
+        dev=dev,
+        repo_root=str(_Path(__file__).resolve().parent.parent),
+        server_url=server_url,
+        fallback_command=_sys.executable,
+        fallback_args=[_Path(__file__).resolve()],
+    )
+    return _json.dumps({"mcpServers": {SERVER_NAME: cfg}}, indent=2)
+
+
+def main(argv: list[str] | None = None):
+    parser = _argparse.ArgumentParser(description="Binary Ninja MCP bridge (MCP stdio server)")
+    parser.add_argument("--server", help="Binary Ninja MCP HTTP server URL (default: env or http://127.0.0.1:9009)")
+    parser.add_argument("--host", help="Binary Ninja MCP HTTP server host")
+    parser.add_argument("--port", type=int, help="Binary Ninja MCP HTTP server port")
+    parser.add_argument("--config", action="store_true", help="Print MCP client config JSON and exit")
+    parser.add_argument("--dev", action="store_true", help="Emit config that uses 'uv run' from the repo root")
+    parser.add_argument("--no-uv", action="store_true", help="Disable uv/uvx preference when generating config")
+    args = parser.parse_args(argv)
+
+    server_url = resolve_server_url(args.server, args.host, args.port)
+    _set_server_url(server_url)
+
+    if args.config:
+        print(_config_json(not args.no_uv, args.dev, server_url))
+        return
+
+    print(f"Starting MCP bridge service (Binary Ninja at {server_url})...", file=_sys.stderr)
     try:
         mcp.run()
+    except (KeyboardInterrupt, EOFError):
+        pass
     except Exception as _e:
-        # Ensure any runtime exception is captured in the log file
         _bridge_excepthook(type(_e), _e, _e.__traceback__)
         raise
+
+
+if __name__ == "__main__":
+    main()
