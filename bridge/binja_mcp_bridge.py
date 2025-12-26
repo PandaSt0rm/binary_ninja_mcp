@@ -2,6 +2,8 @@ import sys as _sys
 import traceback as _tb
 import argparse as _argparse
 import json as _json
+import os as _os
+import time as _time
 from pathlib import Path as _Path
 
 
@@ -38,6 +40,66 @@ def _set_server_url(url: str):
     binja_server_url = url
 
 
+def _float_env(name: str, default: float) -> float:
+    raw = _os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except Exception:
+        return default
+
+
+def _retry_max_wait() -> float:
+    return _float_env("BINARY_NINJA_MCP_RETRY_MAX_WAIT", 300.0)
+
+
+def _retry_after_default() -> float:
+    return _float_env("BINARY_NINJA_MCP_RETRY_AFTER", 15.0)
+
+
+def _parse_retry_after(response) -> float:
+    header = response.headers.get("Retry-After")
+    if header:
+        try:
+            value = float(header)
+            return max(0.0, value)
+        except Exception:
+            pass
+    return _retry_after_default()
+
+
+def _request_with_retry(
+    method: str,
+    url: str,
+    *,
+    data=None,
+    timeout: float | None = None,
+):
+    max_wait = _retry_max_wait()
+    deadline = None
+    if max_wait > 0:
+        deadline = _time.monotonic() + max_wait
+    while True:
+        if timeout is None:
+            response = requests.request(method, url, data=data)
+        else:
+            response = requests.request(method, url, data=data, timeout=timeout)
+        response.encoding = "utf-8"
+        if response.status_code != 503:
+            return response
+        if deadline is None:
+            return response
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            return response
+        wait = min(_parse_retry_after(response), remaining)
+        if wait > 0:
+            _time.sleep(wait)
+        else:
+            _time.sleep(0.1)
+
+
 def _active_filename() -> str:
     """Return the currently active filename as known by the server."""
     try:
@@ -49,7 +111,7 @@ def _active_filename() -> str:
     return "(none)"
 
 
-def safe_get(endpoint: str, params: dict | None = None, timeout: float | None = 5) -> list:
+def safe_get(endpoint: str, params: dict | None = None, timeout: float | None = 20) -> list:
     """
     Perform a GET request. If 'params' is given, we convert it to a query string.
     """
@@ -62,20 +124,15 @@ def safe_get(endpoint: str, params: dict | None = None, timeout: float | None = 
         url += "?" + query_string
 
     try:
-        if timeout is None:
-            response = requests.get(url)
-        else:
-            response = requests.get(url, timeout=timeout)
-        response.encoding = "utf-8"
+        response = _request_with_retry("GET", url, timeout=timeout)
         if response.ok:
             return response.text.splitlines()
-        else:
-            return [f"Error {response.status_code}: {response.text.strip()}"]
+        return [f"Error {response.status_code}: {response.text.strip()}"]
     except Exception as e:
         return [f"Request failed: {e!s}"]
 
 
-def get_json(endpoint: str, params: dict | None = None, timeout: float | None = 5):
+def get_json(endpoint: str, params: dict | None = None, timeout: float | None = 20):
     """
     Perform a GET and return parsed JSON.
     - On 2xx: returns parsed JSON.
@@ -90,11 +147,7 @@ def get_json(endpoint: str, params: dict | None = None, timeout: float | None = 
     if query_string:
         url += "?" + query_string
     try:
-        if timeout is None:
-            response = requests.get(url)
-        else:
-            response = requests.get(url, timeout=timeout)
-        response.encoding = "utf-8"
+        response = _request_with_retry("GET", url, timeout=timeout)
         # Try to parse JSON regardless of status
         try:
             data = response.json()
@@ -115,7 +168,7 @@ def get_json(endpoint: str, params: dict | None = None, timeout: float | None = 
         return {"error": f"Request failed: {e!s}"}
 
 
-def get_text(endpoint: str, params: dict | None = None, timeout: float | None = 5) -> str:
+def get_text(endpoint: str, params: dict | None = None, timeout: float | None = 20) -> str:
     """Perform a GET and return raw text (or an error string)."""
     if params is None:
         params = {}
@@ -125,15 +178,10 @@ def get_text(endpoint: str, params: dict | None = None, timeout: float | None = 
     if query_string:
         url += "?" + query_string
     try:
-        if timeout is None:
-            response = requests.get(url)
-        else:
-            response = requests.get(url, timeout=timeout)
-        response.encoding = "utf-8"
+        response = _request_with_retry("GET", url, timeout=timeout)
         if response.ok:
             return response.text
-        else:
-            return f"Error {response.status_code}: {response.text.strip()}"
+        return f"Error {response.status_code}: {response.text.strip()}"
     except Exception as e:
         return f"Request failed: {e!s}"
 
@@ -141,16 +189,19 @@ def get_text(endpoint: str, params: dict | None = None, timeout: float | None = 
 def safe_post(endpoint: str, data: dict | str) -> str:
     try:
         if isinstance(data, dict):
-            response = requests.post(f"{binja_server_url}/{endpoint}", data=data, timeout=5)
-        else:
-            response = requests.post(
-                f"{binja_server_url}/{endpoint}", data=data.encode("utf-8"), timeout=5
+            response = _request_with_retry(
+                "POST", f"{binja_server_url}/{endpoint}", data=data, timeout=20
             )
-        response.encoding = "utf-8"
+        else:
+            response = _request_with_retry(
+                "POST",
+                f"{binja_server_url}/{endpoint}",
+                data=data.encode("utf-8"),
+                timeout=20,
+            )
         if response.ok:
             return response.text.strip()
-        else:
-            return f"Error {response.status_code}: {response.text.strip()}"
+        return f"Error {response.status_code}: {response.text.strip()}"
     except Exception as e:
         return f"Request failed: {e!s}"
 
@@ -1004,12 +1055,20 @@ def _config_json(prefer_uv: bool, dev: bool, server_url: str) -> str:
 
 def main(argv: list[str] | None = None):
     parser = _argparse.ArgumentParser(description="Binary Ninja MCP bridge (MCP stdio server)")
-    parser.add_argument("--server", help="Binary Ninja MCP HTTP server URL (default: env or http://127.0.0.1:9009)")
+    parser.add_argument(
+        "--server", help="Binary Ninja MCP HTTP server URL (default: env or http://127.0.0.1:9009)"
+    )
     parser.add_argument("--host", help="Binary Ninja MCP HTTP server host")
     parser.add_argument("--port", type=int, help="Binary Ninja MCP HTTP server port")
-    parser.add_argument("--config", action="store_true", help="Print MCP client config JSON and exit")
-    parser.add_argument("--dev", action="store_true", help="Emit config that uses 'uv run' from the repo root")
-    parser.add_argument("--no-uv", action="store_true", help="Disable uv/uvx preference when generating config")
+    parser.add_argument(
+        "--config", action="store_true", help="Print MCP client config JSON and exit"
+    )
+    parser.add_argument(
+        "--dev", action="store_true", help="Emit config that uses 'uv run' from the repo root"
+    )
+    parser.add_argument(
+        "--no-uv", action="store_true", help="Disable uv/uvx preference when generating config"
+    )
     args = parser.parse_args(argv)
 
     server_url = resolve_server_url(args.server, args.host, args.port)

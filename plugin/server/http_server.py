@@ -2,6 +2,16 @@ import json
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+try:
+    from http.server import ThreadingHTTPServer
+except ImportError:
+    from socketserver import ThreadingMixIn
+
+    class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+
 from typing import Any
 
 import binaryninja as bn
@@ -16,6 +26,8 @@ from ..utils.string_utils import parse_int_or_default
 
 class MCPRequestHandler(BaseHTTPRequestHandler):
     binary_ops = None  # Will be set by the server
+    request_lock = threading.Lock()
+    request_lock_timeout = 15.0
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -32,13 +44,21 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         bn.log_info(format % args)
 
-    def _set_headers(self, content_type="application/json", status_code=200):
+    def _set_headers(
+        self,
+        content_type="application/json",
+        status_code=200,
+        extra_headers: dict[str, str] | None = None,
+    ):
         try:
             self.send_response(status_code)
             self.send_header("Content-Type", content_type)
             self.send_header("Access-Control-Allow-Origin", "*")
             # Encourage clients to close promptly; reduces BrokenPipe on abrupt disconnects
             self.send_header("Connection", "close")
+            if extra_headers:
+                for key, value in extra_headers.items():
+                    self.send_header(key, value)
             self.end_headers()
         except (BrokenPipeError, OSError):
             try:
@@ -48,9 +68,14 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def _send_json_response(self, data: dict[str, Any], status_code: int = 200):
+    def _send_json_response(
+        self,
+        data: dict[str, Any],
+        status_code: int = 200,
+        extra_headers: dict[str, str] | None = None,
+    ):
         try:
-            self._set_headers(status_code=status_code)
+            self._set_headers(status_code=status_code, extra_headers=extra_headers)
             # If headers failed due to disconnect, avoid writing body
             try:
                 body = json.dumps(data).encode("utf-8")
@@ -214,7 +239,25 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _run_locked(self, func):
+        acquired = self.request_lock.acquire(timeout=self.request_lock_timeout)
+        if not acquired:
+            retry_after = int(self.request_lock_timeout)
+            self._send_json_response(
+                {"error": "Server busy", "retry_after": retry_after},
+                status_code=503,
+                extra_headers={"Retry-After": str(retry_after)},
+            )
+            return None
+        try:
+            return func()
+        finally:
+            self.request_lock.release()
+
     def do_GET(self):
+        return self._run_locked(self._do_GET)
+
+    def _do_GET(self):
         try:
             # For all endpoints except /status, /convertNumber, /platforms, /binaries, /views, /selectBinary, check loaded
             if (
@@ -1841,6 +1884,9 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             )
 
     def do_POST(self):
+        return self._run_locked(self._do_POST)
+
+    def _do_POST(self):
         try:
             if not self._check_binary_loaded():
                 return
@@ -2307,7 +2353,8 @@ class MCPServer:
             {"binary_ops": self.binary_ops},
         )
 
-        self.server = HTTPServer(server_address, handler_class)
+        self.server = ThreadingHTTPServer(server_address, handler_class)
+        self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.daemon = True
         self.thread.start()
