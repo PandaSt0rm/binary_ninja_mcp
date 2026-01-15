@@ -20,11 +20,9 @@ from binaryninja.settings import Settings
 from ..api.endpoints import BinaryNinjaEndpoints
 from ..core.binary_operations import BinaryOperations
 from ..core.config import Config
-from ..utils.number_utils import (
-    convert_number as util_convert_number,
-    is_int_like as util_is_int_like,
-    parse_address as util_parse_address,
-)
+from ..utils.number_utils import convert_number as util_convert_number
+from ..utils.number_utils import is_int_like as util_is_int_like
+from ..utils.number_utils import parse_address as util_parse_address
 from ..utils.string_utils import parse_int_or_default
 
 

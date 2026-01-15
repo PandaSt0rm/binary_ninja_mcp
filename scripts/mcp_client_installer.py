@@ -21,10 +21,10 @@ except ImportError:
     )
 
 try:
-    from ..config import build_mcp_server_config, resolve_server_url, SERVER_NAME
+    from ..config import SERVER_NAME, build_mcp_server_config, resolve_server_url
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-    from config import build_mcp_server_config, resolve_server_url, SERVER_NAME
+    from config import SERVER_NAME, build_mcp_server_config, resolve_server_url
 
 
 MCP_SERVER_KEY = SERVER_NAME
@@ -296,8 +296,12 @@ def main():
     )
     parser.add_argument("--config", action="store_true", help="Print generic MCP config JSON")
     parser.add_argument("--quiet", action="store_true", help="Reduce output noise")
-    parser.add_argument("--dev", action="store_true", help="Use 'uv run' from the repo root for MCP config")
-    parser.add_argument("--no-uv", action="store_true", help="Disable uv/uvx preference in generated configs")
+    parser.add_argument(
+        "--dev", action="store_true", help="Use 'uv run' from the repo root for MCP config"
+    )
+    parser.add_argument(
+        "--no-uv", action="store_true", help="Disable uv/uvx preference in generated configs"
+    )
     parser.add_argument("--server", help="Binary Ninja MCP HTTP server URL")
     parser.add_argument("--host", help="Binary Ninja MCP HTTP server host")
     parser.add_argument("--port", type=int, help="Binary Ninja MCP HTTP server port")

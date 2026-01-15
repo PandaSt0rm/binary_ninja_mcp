@@ -11,7 +11,9 @@ SERVER_NAME = "binary_ninja_mcp"
 GITHUB_REPO = "https://github.com/fosdickio/binary_ninja_mcp"
 
 
-def resolve_server_url(url: str | None = None, host: str | None = None, port: str | int | None = None) -> str:
+def resolve_server_url(
+    url: str | None = None, host: str | None = None, port: str | int | None = None
+) -> str:
     """Resolve the Binary Ninja MCP HTTP server URL with env/arg fallbacks."""
     if url:
         return url
@@ -33,7 +35,7 @@ def resolve_server_url(url: str | None = None, host: str | None = None, port: st
 def _auto_repo_root(start: Path | None = None) -> str | None:
     """Walk upward to find a pyproject.toml and return its directory."""
     p = start or Path(__file__).resolve()
-    for parent in [p] + list(p.parents):
+    for parent in [p, *list(p.parents)]:
         candidate = parent / "pyproject.toml"
         if candidate.exists():
             return str(parent)
