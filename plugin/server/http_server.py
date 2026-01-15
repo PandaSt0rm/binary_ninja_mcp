@@ -2361,7 +2361,10 @@ class MCPServer:
         handler_class = type(
             "MCPRequestHandlerWithOps",
             (MCPRequestHandler,),
-            {"binary_ops": self.binary_ops},
+            {
+                "binary_ops": self.binary_ops,
+                "request_lock": threading.Lock(),
+            },
         )
 
         self.server = ThreadingHTTPServer(server_address, handler_class)

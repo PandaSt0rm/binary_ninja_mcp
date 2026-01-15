@@ -53,11 +53,11 @@ def _float_env(name: str, default: float) -> float:
 
 
 def _retry_max_wait() -> float:
-    return _float_env("BINARY_NINJA_MCP_RETRY_MAX_WAIT", 300.0)
+    return _float_env("BINARY_NINJA_MCP_RETRY_MAX_WAIT", 20.0)
 
 
 def _retry_after_default() -> float:
-    return _float_env("BINARY_NINJA_MCP_RETRY_AFTER", 15.0)
+    return _float_env("BINARY_NINJA_MCP_RETRY_AFTER", 5.0)
 
 
 def _parse_retry_after(response) -> float:

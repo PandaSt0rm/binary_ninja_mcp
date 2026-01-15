@@ -14,6 +14,41 @@ class BinaryNinjaMCP:
         self.config = Config()
         self.server = MCPServer(self.config)
 
+    def restart_server(self, bv):
+        try:
+            if bv is None:
+                bn.log_debug("MCP Max restart requested but no BinaryView is active; deferring")
+                _show_no_bv_popup()
+                return
+            was_running = bool(self.server and self.server.server)
+            if was_running:
+                try:
+                    self.server.binary_ops.current_view = None
+                except Exception:
+                    pass
+                self.server.stop()
+            # Recreate server instance to ensure clean state
+            self.server = MCPServer(self.config)
+            self.server.binary_ops.current_view = bv
+            try:
+                self.server.binary_ops.register_view(bv)
+            except Exception:
+                pass
+            self.server.start()
+            global _mcp_user_stopped
+            _mcp_user_stopped = False
+            bn.log_info(
+                f"MCP server restarted on http://{self.config.server.host}:{self.config.server.port}"
+            )
+            _set_status_indicator(True)
+            _show_popup(
+                "MCP Server Restarted",
+                f"Running at http://{self.config.server.host}:{self.config.server.port}",
+            )
+        except Exception as e:
+            bn.log_error(f"Failed to restart MCP server: {e!s}")
+            _show_popup("MCP Server Error", f"Failed to restart: {e}")
+
     def start_server(self, bv):
         try:
             # Require an active BinaryView (match menu behavior)
@@ -722,6 +757,11 @@ bn.PluginCommand.register(
     "MCP Server\\Stop MCP Server",
     "Stop the Binary Ninja MCP server",
     plugin.stop_server,
+)
+bn.PluginCommand.register(
+    "MCP Server\\Restart MCP Server",
+    "Restart the Binary Ninja MCP server",
+    plugin.restart_server,
 )
 
 bn.log_info("Binary Ninja MCP plugin loaded successfully")
