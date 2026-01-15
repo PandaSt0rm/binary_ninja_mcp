@@ -7,6 +7,7 @@ from typing import Any
 import binaryninja as bn
 from binaryninja.enums import StructureVariant, TypeClass
 
+from ..utils.number_utils import parse_address, parse_int
 from ..utils.string_utils import escape_non_ascii
 from .config import BinaryNinjaConfig
 
@@ -349,18 +350,20 @@ class BinaryOperations:
             raise RuntimeError("No binary loaded")
 
         # Handle address-based lookup
-        try:
-            if isinstance(identifier, str) and identifier.startswith("0x"):
-                addr = int(identifier, 16)
-            elif isinstance(identifier, (int, str)):
-                addr = int(identifier) if isinstance(identifier, str) else identifier
-
-            func = self._current_view.get_function_at(addr)
+        addr = None
+        if isinstance(identifier, (int, str)):
+            try:
+                addr = parse_address(identifier)
+            except ValueError:
+                addr = None
+        if addr is not None:
+            try:
+                func = self._current_view.get_function_at(addr)
+            except Exception:
+                func = None
             if func:
                 bn.log_info(f"Found function at address {hex(addr)}: {func.name}")
                 return func
-        except ValueError:
-            pass
 
         # Handle name-based lookup with case sensitivity
         for func in self._current_view.functions:
@@ -858,12 +861,9 @@ class BinaryOperations:
 
         # Parse address
         try:
-            if isinstance(address, str) and address.lower().startswith("0x"):
-                addr = int(address, 16)
-            else:
-                addr = int(address)
-        except Exception:
-            raise ValueError(f"Invalid address: {address}")
+            addr = parse_address(address)
+        except Exception as e:
+            raise ValueError(f"Invalid address: {address}") from e
 
         bv = self._current_view
 
@@ -2106,11 +2106,7 @@ class BinaryOperations:
 
                         # Convert offset to integer
                         try:
-                            offset = (
-                                int(offset_str, 16)
-                                if offset_str.startswith("0x") or offset_str.startswith("-0x")
-                                else int(offset_str)
-                            )
+                            offset = parse_int(offset_str, default_base=10)
 
                             # Try to find variable name
                             var_name = var_map.get(offset)
@@ -2331,12 +2327,9 @@ class BinaryOperations:
 
         # Normalize address to int
         try:
-            if isinstance(address, str):
-                addr = int(address, 16) if address.startswith("0x") else int(address)
-            else:
-                addr = int(address)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid address format; use hex (0x...) or decimal")
+            addr = parse_address(address)
+        except (TypeError, ValueError) as e:
+            raise ValueError("Invalid address format; use hex like 0x401000 (or dec:123)") from e
 
         result: dict[str, Any] = {
             "address": hex(addr),
@@ -3434,38 +3427,65 @@ class BinaryOperations:
             raise RuntimeError("No binary loaded")
 
         # Parse address
-        # Only treat as hex if it has "0x" prefix or contains a-f/A-F characters
-        # This avoids ambiguity where "123" would be treated as hex instead of decimal
-        if isinstance(address, str):
-            address = address.strip()
-            if address.startswith("0x") or address.startswith("0X"):
-                addr = int(address, 16)
-            elif any(c in "abcdefABCDEF" for c in address):
-                # Contains hex letters, treat as hex
-                addr = int(address, 16)
-            else:
-                # Pure digits, treat as decimal
-                addr = int(address, 10)
-        else:
-            addr = int(address)
+        try:
+            addr = parse_address(address)
+        except Exception as e:
+            raise ValueError(f"Invalid address: {address}") from e
 
         # Parse data into bytes
         patch_bytes = None
         if isinstance(data, bytes):
             patch_bytes = data
         elif isinstance(data, str):
-            # Try to parse as hex string
             data_str = data.strip()
-            # Remove "0x" prefix if present
-            if data_str.startswith("0x"):
-                data_str = data_str[2:]
-            # Remove spaces
-            data_str = data_str.replace(" ", "").replace("\n", "").replace("\t", "")
-            # Convert hex string to bytes
+
+            # JSON list support: "[144, 144]" or "[0x90, 0x90]" (via earlier parsing).
             try:
-                patch_bytes = bytes.fromhex(data_str)
-            except ValueError as e:
-                raise ValueError(f"Invalid hex string: {e}")
+                import json as _json
+
+                parsed = _json.loads(data_str)
+                if isinstance(parsed, list):
+                    patch_bytes = bytes(parsed)
+            except Exception:
+                patch_bytes = None
+
+            if patch_bytes is None:
+                # Accept:
+                # - "90 90"
+                # - "0x90 0x90"
+                # - "90,90"
+                # - "9090"
+                tokens = [t for t in re.split(r"[,\s]+", data_str) if t]
+
+                if len(tokens) == 1:
+                    token = tokens[0].strip().replace("_", "")
+                    if token.lower().startswith("0x"):
+                        token = token[2:]
+                    if re.fullmatch(r"[0-9a-fA-F]+", token) and (len(token) % 2 == 0):
+                        try:
+                            patch_bytes = bytes.fromhex(token)
+                        except ValueError as e:
+                            raise ValueError(f"Invalid hex string: {e}") from e
+
+                if patch_bytes is None:
+                    values: list[int] = []
+                    for token in tokens:
+                        t = token.strip().replace("_", "")
+                        if t.lower().startswith("0x"):
+                            t = t[2:]
+                        if not t:
+                            continue
+                        try:
+                            b = int(t, 16)
+                        except Exception as e:
+                            raise ValueError(f"Invalid byte token: {token!r}") from e
+                        if not (0 <= b <= 0xFF):
+                            raise ValueError(f"Byte out of range: {token!r}")
+                        values.append(b)
+                    try:
+                        patch_bytes = bytes(values)
+                    except (ValueError, TypeError) as e:
+                        raise ValueError(f"Invalid byte list: {e}") from e
         elif isinstance(data, list):
             # List of integers
             try:

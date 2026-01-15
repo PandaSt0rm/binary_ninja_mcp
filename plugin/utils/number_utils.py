@@ -1,6 +1,80 @@
 import re
 
 
+def parse_int(text: str | int, *, default_base: int = 10) -> int:
+    """Parse an integer from common RE-friendly formats.
+
+    Supports:
+    - Decimal: "123", "+123", "-123", "dec:123"
+    - Hex: "0x7b", "7Bh", "hex:7b", "deadbeef"
+    - Binary: "0b1010"
+    - Octal: "0o17"
+    - Underscores: "0x7b_00"
+
+    For digit-only strings, uses default_base.
+    """
+    if isinstance(text, int):
+        return text
+
+    s = (str(text) if text is not None else "").strip()
+    if not s:
+        raise ValueError("empty input")
+
+    sign = 1
+    if s[0] in "+-":
+        sign = -1 if s[0] == "-" else 1
+        s = s[1:].strip()
+    if not s:
+        raise ValueError("empty input")
+
+    lowered = s.lower()
+    if lowered.startswith(("dec:", "decimal:", "d:")):
+        body = s.split(":", 1)[1].strip()
+        return sign * int(body.replace("_", ""), 10)
+
+    if lowered.startswith(("hex:", "h:")):
+        body = s.split(":", 1)[1].strip()
+        return sign * int(body.replace("_", ""), 16)
+
+    if lowered.startswith("0x"):
+        return sign * int(s[2:].replace("_", ""), 16)
+    if lowered.startswith("0b"):
+        return sign * int(s[2:].replace("_", ""), 2)
+    if lowered.startswith("0o"):
+        return sign * int(s[2:].replace("_", ""), 8)
+
+    if lowered.endswith("h") and re.fullmatch(r"[0-9a-f_]+h", lowered):
+        return sign * int(s[:-1].replace("_", ""), 16)
+
+    if re.fullmatch(r"[0-9_]+", s):
+        return sign * int(s.replace("_", ""), int(default_base))
+
+    if re.fullmatch(r"[0-9a-fA-F_]+", s):
+        return sign * int(s.replace("_", ""), 16)
+
+    raise ValueError(f"invalid integer: {text!r}")
+
+
+def parse_address(text: str | int) -> int:
+    """Parse an address/offset.
+
+    Defaults to hexadecimal for digit-only strings to match reverse-engineering conventions.
+    Use an explicit prefix (e.g. "dec:123") to force decimal.
+    """
+    value = parse_int(text, default_base=16)
+    if value < 0:
+        raise ValueError("address must be non-negative")
+    return value
+
+
+def is_int_like(text: str | int) -> bool:
+    try:
+        _ = parse_int(text, default_base=16)
+        return True
+    except Exception:
+        return False
+
+
 def _decode_escaped_string(s: str) -> bytes:
     r"""Decode a C/JSON-like escaped string into raw bytes.
 

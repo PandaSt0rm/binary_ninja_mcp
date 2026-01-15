@@ -201,6 +201,7 @@ The following table lists the available MCP functions for use:
 
 These are the list of HTTP endpoints that can be called:
 
+- Address parsing: address params default to hex (0x... or plain hex); use dec:<n> to force decimal.
 - `/allStrings`: All strings in one response.
 - `/formatValue?address=<addr>&text=<value>&size=<n>`: Convert and set a comment at an address.
 - `/getXrefsTo?address=<addr>`: Xrefs to address (code+data).

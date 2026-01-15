@@ -2,6 +2,7 @@ import sys as _sys
 import traceback as _tb
 import argparse as _argparse
 import json as _json
+import re as _re
 import os as _os
 import time as _time
 from pathlib import Path as _Path
@@ -112,6 +113,43 @@ def _active_filename() -> str:
     return "(none)"
 
 
+def _is_int_like(text: str) -> bool:
+    """Best-effort integer detection for routing params (name vs address)."""
+    s = (text or "").strip()
+    if not s:
+        return False
+    if s[0] in "+-":
+        s = s[1:].strip()
+    if not s:
+        return False
+
+    lowered = s.lower()
+    if lowered.startswith(("dec:", "decimal:", "d:")):
+        body = s.split(":", 1)[1].strip()
+        return _re.fullmatch(r"[0-9_]+", body) is not None
+
+    if lowered.startswith(("hex:", "h:")):
+        body = s.split(":", 1)[1].strip()
+        return _re.fullmatch(r"[0-9a-fA-F_]+", body) is not None
+
+    if lowered.startswith("0x"):
+        return _re.fullmatch(r"[0-9a-fA-F_]+", s[2:]) is not None
+    if lowered.startswith("0b"):
+        return _re.fullmatch(r"[01_]+", s[2:]) is not None
+    if lowered.startswith("0o"):
+        return _re.fullmatch(r"[0-7_]+", s[2:]) is not None
+
+    if lowered.endswith("h") and _re.fullmatch(r"[0-9a-f_]+h", lowered):
+        return True
+
+    if _re.fullmatch(r"[0-9_]+", s):
+        return True
+    if _re.fullmatch(r"[0-9a-fA-F_]+", s):
+        return True
+
+    return False
+
+
 def safe_get(endpoint: str, params: dict | None = None, timeout: float | None = 20) -> list:
     """
     Perform a GET request. If 'params' is given, we convert it to a query string.
@@ -161,6 +199,31 @@ def get_json(endpoint: str, params: dict | None = None, timeout: float | None = 
                 data = {"error": str(data)}
             data.setdefault("status", response.status_code)
             return data
+        text = (response.text or "").strip()
+        return {"error": f"Error {response.status_code}: {text}"}
+    except Exception as e:
+        return {"error": f"Request failed: {e!s}"}
+
+
+def post_json(endpoint: str, data: dict | str | None = None, timeout: float | None = 20):
+    """Perform a POST and return parsed JSON.
+
+    Mirrors get_json() behavior for error handling.
+    """
+    url = f"{binja_server_url}/{endpoint}"
+    try:
+        response = _request_with_retry("POST", url, data=data, timeout=timeout)
+        try:
+            parsed = response.json()
+        except Exception:
+            parsed = None
+        if response.ok:
+            return parsed
+        if isinstance(parsed, dict):
+            if "error" not in parsed:
+                parsed = {"error": str(parsed)}
+            parsed.setdefault("status", response.status_code)
+            return parsed
         text = (response.text or "").strip()
         return {"error": f"Error {response.status_code}: {text}"}
     except Exception as e:
@@ -289,32 +352,29 @@ def rename_multi_variables(
     """
     params: dict[str, object] = {}
     ident = (function_identifier or "").strip()
-    if ident.lower().startswith("0x") or ident.isdigit():
+    if _is_int_like(ident):
         params["address"] = ident
     else:
         params["functionName"] = ident
 
-    payload = None
-    import json as _json
-
     if renames_json:
         try:
-            payload = _json.loads(renames_json)
+            _json.loads(renames_json)
         except Exception:
             return "Error: renames_json is not valid JSON"
-        params["renames"] = payload
+        params["renames"] = renames_json
     elif mapping_json:
         try:
-            payload = _json.loads(mapping_json)
+            _json.loads(mapping_json)
         except Exception:
             return "Error: mapping_json is not valid JSON"
-        params["mapping"] = payload
+        params["mapping"] = mapping_json
     elif pairs:
         params["pairs"] = pairs
     else:
         return "Error: provide mapping_json, renames_json, or pairs"
 
-    data = get_json("renameVariables", params)
+    data = post_json("renameVariables", params)
     if not data:
         return "Error: no response"
     if isinstance(data, dict) and data.get("error"):
@@ -332,7 +392,7 @@ def define_types(c_code: str) -> str:
     """
     Define types from a C code string.
     """
-    data = get_json("defineTypes", {"cCode": c_code})
+    data = post_json("defineTypes", {"cCode": c_code})
     if not data:
         return "Error: no response"
     # Expect a list of defined type names or a dict; normalize to string
@@ -421,7 +481,7 @@ def get_il(name_or_address: str, view: str = "hlil", ssa: bool = False) -> str:
     file_line = f"File: {_active_filename()}\n\n"
     ident = (name_or_address or "").strip()
     params = {"view": view, "ssa": int(bool(ssa))}
-    if ident.lower().startswith("0x") or ident.isdigit():
+    if _is_int_like(ident):
         params["address"] = ident
     else:
         params["name"] = ident
@@ -820,7 +880,7 @@ def get_stack_frame_vars(function_identifier: str) -> list:
     ident = (function_identifier or "").strip()
     params = {}
     # Choose param name based on identifier format
-    if ident.lower().startswith("0x") or ident.isdigit():
+    if _is_int_like(ident):
         params["address"] = ident
     else:
         params["name"] = ident
@@ -880,15 +940,15 @@ def set_function_prototype(name_or_address: str, prototype: str) -> str:
     """
     Set a function's prototype by name or address.
     """
-    # Use GET like other endpoints (server accepts complex prototypes)
+    # Use POST to avoid URL length limits on long prototypes.
     ident = (name_or_address or "").strip()
     params = {"prototype": prototype}
     # Choose param name based on identifier format
-    if ident.lower().startswith("0x") or ident.isdigit():
+    if _is_int_like(ident):
         params["address"] = ident
     else:
         params["name"] = ident
-    data = get_json("setFunctionPrototype", params)
+    data = post_json("setFunctionPrototype", params)
     if not data:
         return "Error: no response"
     if isinstance(data, dict) and "status" in data:
@@ -945,7 +1005,7 @@ def declare_c_type(c_declaration: str) -> str:
     """
     Create or update a local type from a C declaration.
     """
-    data = get_json("declareCType", {"declaration": c_declaration})
+    data = post_json("declareCType", {"declaration": c_declaration})
     if not data:
         return "Error: no response"
     if isinstance(data, dict) and data.get("defined_types"):
@@ -995,7 +1055,7 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> str:
         save_to_file = save_to_file.lower() not in ("false", "0", "no")
 
     params = {"address": address, "data": data, "save_to_file": save_to_file}
-    result = get_json("patch", params)
+    result = post_json("patch", params)
     if not result:
         return "Error: no response"
 
