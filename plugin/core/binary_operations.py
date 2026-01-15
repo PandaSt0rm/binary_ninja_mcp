@@ -226,37 +226,72 @@ class BinaryOperations:
         return items
 
     def select_view(self, ident: str) -> dict[str, str] | None:
-        """Select active BinaryView by id or filename/basename.
+        """Select active BinaryView by ordinal, internal view id, or filename/basename.
 
         Returns selection info on success, None on failure.
         """
-        s = (ident or "").strip()
-        if not s:
+        raw = (ident or "").strip()
+        if not raw:
             return None
         self._prune_views()
-        # Try id
-        w = self._views_by_id.get(s)
-        vb = None
-        if w is not None:
+
+        def _resolve_by_internal_id(view_id: str) -> bn.BinaryView | None:
+            w = self._views_by_id.get(view_id)
+            if w is None:
+                return None
             try:
-                vb = w()
+                return w()
             except Exception:
-                vb = None
-        # If user passed a 1-based ordinal (from /binaries), map it to filename
-        if vb is None and s.isdigit():
+                return None
+
+        def _resolve_by_ordinal(ordinal: str) -> bn.BinaryView | None:
+            if not ordinal.isdigit():
+                return None
             try:
-                idx = int(s)
-                if idx >= 1:
-                    lst = self.list_open_binaries()  # sorted order
-                    if 1 <= idx <= len(lst):
-                        fname = lst[idx - 1].get("filename")
-                        if fname:
-                            map_id = self._id_by_filename.get(fname)
-                            if map_id:
-                                wmap = self._views_by_id.get(map_id)
-                                vb = wmap() if wmap else None
+                idx = int(ordinal)
             except Exception:
-                vb = None
+                return None
+            if idx < 1:
+                return None
+            lst = self.list_open_binaries()  # sorted order
+            if not (1 <= idx <= len(lst)):
+                return None
+            fname = lst[idx - 1].get("filename")
+            if not fname:
+                return None
+            map_id = self._id_by_filename.get(fname)
+            if not map_id:
+                return None
+            return _resolve_by_internal_id(map_id)
+
+        vb: bn.BinaryView | None = None
+        s = raw
+        lowered = raw.lower()
+        forced_internal_id: str | None = None
+        forced_ordinal: str | None = None
+        if lowered.startswith(("view:", "view=")):
+            forced_internal_id = raw.split(":", 1)[1] if ":" in raw else raw.split("=", 1)[1]
+            forced_internal_id = forced_internal_id.strip()
+        elif lowered.startswith(("id:", "id=")):
+            forced_ordinal = raw.split(":", 1)[1] if ":" in raw else raw.split("=", 1)[1]
+            forced_ordinal = forced_ordinal.strip()
+        elif raw.startswith("#"):
+            forced_ordinal = raw[1:].strip()
+
+        if forced_internal_id is not None:
+            vb = _resolve_by_internal_id(forced_internal_id)
+        elif forced_ordinal is not None:
+            vb = _resolve_by_ordinal(forced_ordinal)
+        else:
+            # Ambiguity note: internal view ids are often numeric, which collides with user-facing
+            # 1-based ordinals from /binaries. Prefer ordinal resolution for digit-only input.
+            if s.isdigit():
+                vb = _resolve_by_ordinal(s)
+                if vb is None:
+                    vb = _resolve_by_internal_id(s)
+            else:
+                vb = _resolve_by_internal_id(s)
+
         # Try direct filename mapping
         if vb is None:
             try:

@@ -41,7 +41,9 @@ class BinaryNinjaEndpoints:
             selectors: list[str] = []
             for candidate in (
                 entry["id"],
+                f"id:{entry['id']}",
                 view_id,
+                f"view:{view_id}",
                 filename,
                 basename,
             ):
@@ -81,7 +83,7 @@ class BinaryNinjaEndpoints:
         if not selected_entry:
             basename = os.path.basename(filename) if filename else None
             selectors: list[str] = []
-            for candidate in (view_id, filename, basename):
+            for candidate in (view_id, f"view:{view_id}" if view_id else None, filename, basename):
                 if candidate and candidate not in selectors:
                     selectors.append(candidate)
             selected_entry = {

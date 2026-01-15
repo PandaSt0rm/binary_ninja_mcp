@@ -5,6 +5,7 @@ import json as _json
 import os as _os
 import time as _time
 from pathlib import Path as _Path
+import urllib.parse as _urllib_parse
 
 
 # Install a very-early excepthook so any ImportError at module import time is captured.
@@ -117,8 +118,7 @@ def safe_get(endpoint: str, params: dict | None = None, timeout: float | None = 
     """
     if params is None:
         params = {}
-    qs = [f"{k}={v}" for k, v in params.items()]
-    query_string = "&".join(qs)
+    query_string = _urllib_parse.urlencode(params, doseq=True)
     url = f"{binja_server_url}/{endpoint}"
     if query_string:
         url += "?" + query_string
@@ -141,8 +141,7 @@ def get_json(endpoint: str, params: dict | None = None, timeout: float | None = 
     """
     if params is None:
         params = {}
-    qs = [f"{k}={v}" for k, v in params.items()]
-    query_string = "&".join(qs)
+    query_string = _urllib_parse.urlencode(params, doseq=True)
     url = f"{binja_server_url}/{endpoint}"
     if query_string:
         url += "?" + query_string
@@ -172,8 +171,7 @@ def get_text(endpoint: str, params: dict | None = None, timeout: float | None = 
     """Perform a GET and return raw text (or an error string)."""
     if params is None:
         params = {}
-    qs = [f"{k}={v}" for k, v in params.items()]
-    query_string = "&".join(qs)
+    query_string = _urllib_parse.urlencode(params, doseq=True)
     url = f"{binja_server_url}/{endpoint}"
     if query_string:
         url += "?" + query_string
