@@ -328,6 +328,87 @@ class BinaryNinjaEndpoints:
                 ]
             return {"error": str(e), "available_platforms": platforms}
 
+    def list_platforms(self) -> dict[str, Any]:
+        """List all available platforms from Binary Ninja."""
+        platforms: list[str] = []
+        try:
+            plats_obj = getattr(bn, "Platform", None)
+            if plats_obj is not None:
+                try:
+                    platforms = [str(getattr(p, "name", str(p))) for p in list(plats_obj)]
+                except Exception:
+                    platforms = []
+        except Exception:
+            platforms = []
+
+        if not platforms:
+            # Fallback to the same static catalog used elsewhere
+            platforms = [
+                "decree-x86",
+                "efi-x86",
+                "efi-windows-x86",
+                "efi-x86_64",
+                "efi-windows-x86_64",
+                "efi-aarch64",
+                "efi-windows-aarch64",
+                "efi-armv7",
+                "efi-thumb2",
+                "freebsd-x86",
+                "freebsd-x86_64",
+                "freebsd-aarch64",
+                "freebsd-armv7",
+                "freebsd-thumb2",
+                "ios-aarch64",
+                "ios-armv7",
+                "ios-thumb2",
+                "ios-kernel-aarch64",
+                "ios-kernel-armv7",
+                "ios-kernel-thumb2",
+                "linux-ppc32",
+                "linux-ppcvle32",
+                "linux-ppc64",
+                "linux-ppc32_le",
+                "linux-ppc64_le",
+                "linux-rv32gc",
+                "linux-rv64gc",
+                "linux-x86",
+                "linux-x86_64",
+                "linux-x32",
+                "linux-aarch64",
+                "linux-armv7",
+                "linux-thumb2",
+                "linux-armv7eb",
+                "linux-thumb2eb",
+                "linux-mipsel",
+                "linux-mips",
+                "linux-mips3",
+                "linux-mipsel3",
+                "linux-mips64",
+                "linux-cnmips64",
+                "linux-mipsel64",
+                "mac-x86",
+                "mac-x86_64",
+                "mac-aarch64",
+                "mac-armv7",
+                "mac-thumb2",
+                "mac-kernel-x86",
+                "mac-kernel-x86_64",
+                "mac-kernel-aarch64",
+                "mac-kernel-armv7",
+                "mac-kernel-thumb2",
+                "windows-x86",
+                "windows-x86_64",
+                "windows-aarch64",
+                "windows-armv7",
+                "windows-thumb2",
+                "windows-kernel-x86",
+                "windows-kernel-x86_64",
+                "windows-kernel-windows-aarch64",
+            ]
+
+        platforms = sorted(set(platforms))
+        return {"platforms": platforms, "count": len(platforms)}
+
     def define_types(self, c_code: str) -> dict[str, str]:
         """Define types from C code string
 
@@ -393,7 +474,7 @@ class BinaryNinjaEndpoints:
                 "status": f"Successfully renamed variable '{old_name}' to '{new_name}' in function '{function_name}'"
             }
         except Exception as e:
-            raise ValueError(f"Failed to rename variable: {e!s}")
+            raise ValueError(f"Failed to retype variable: {e!s}")
 
     def rename_variables(
         self,
@@ -579,16 +660,54 @@ class BinaryNinjaEndpoints:
         if not function:
             raise ValueError(f"Function '{function_name}' not found")
 
-        # Try to rename the variable
+        # Try to retype the variable
         try:
             # Get the variable by name and rename it
             variable = function.get_variable_by_name(name)
             if not variable:
                 raise ValueError(f"Variable '{name}' not found in function '{function_name}'")
 
-            variable.type = type_str
+            type_text = (type_str or "").strip()
+            if not type_text:
+                raise ValueError("Missing type string")
+
+            # Parse the type string when possible
+            t = None
+            try:
+                t, _ = self.binary_ops.current_view.parse_type_string(type_text)
+            except Exception:
+                t = None
+
+            if t is None:
+                # Fall back to assigning the string if BN supports it
+                try:
+                    variable.type = type_text
+                    applied = str(type_text)
+                except Exception:
+                    raise ValueError(f"Failed to parse type: '{type_text}'")
+            else:
+                applied = str(t)
+                try:
+                    variable.type = t
+                except Exception:
+                    # Try create_user_var if direct assignment fails
+                    try:
+                        if hasattr(function, "create_user_var") and hasattr(variable, "storage"):
+                            function.create_user_var(variable, t, name)
+                        else:
+                            raise ValueError("Retyping not supported by this Binary Ninja API version")
+                    except Exception as e:
+                        raise ValueError(f"Failed to set variable type: {e!s}")
+
+            try:
+                function.reanalyze(bn.FunctionUpdateType.UserFunctionUpdate)
+            except Exception:
+                pass
             return {
-                "status": f"Successfully retyped variable '{name}' to '{type_str}' in function '{function_name}'"
+                "status": f"Successfully retyped variable '{name}' to '{applied}' in function '{function_name}'",
+                "function": function.name,
+                "variable": name,
+                "applied_type": applied,
             }
         except Exception as e:
             raise ValueError(f"Failed to rename variable: {e!s}")

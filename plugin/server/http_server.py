@@ -137,7 +137,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         # Handle form data
         if "application/x-www-form-urlencoded" in content_type.lower():
             try:
-                return dict(urllib.parse.parse_qsl(post_data))
+                return dict(urllib.parse.parse_qsl(post_data, keep_blank_values=True))
             except Exception as e:
                 bn.log_error(f"Failed to parse form data: {e}")
                 return {"error": "Invalid form data format"}

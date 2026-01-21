@@ -364,6 +364,17 @@ class BinaryOperations:
             if func:
                 bn.log_info(f"Found function at address {hex(addr)}: {func.name}")
                 return func
+            # Fall back to any function that contains this address
+            try:
+                containing = list(self._current_view.get_functions_containing(addr))
+            except Exception:
+                containing = []
+            if containing:
+                func = containing[0]
+                bn.log_info(
+                    f"Found function containing address {hex(addr)}: {func.name}"
+                )
+                return func
 
         # Handle name-based lookup with case sensitivity
         for func in self._current_view.functions:

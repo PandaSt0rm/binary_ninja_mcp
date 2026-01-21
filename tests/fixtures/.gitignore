@@ -1,0 +1,6 @@
+# Compiled test binaries
+test_binary
+test_binary_stripped
+test_binary_x86
+*.o
+*.exe

@@ -22,9 +22,26 @@ Issues = "https://github.com/fosdickio/binary_ninja_mcp/issues"
 [project.scripts]
 binary-ninja-mcp = "binary_ninja_mcp.bridge.binja_mcp_bridge:main"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "responses>=0.25.0",
+]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "integration: marks tests as integration tests requiring a running Binary Ninja MCP server (deselect with '-m \"not integration\"')",
+]
 
 [tool.setuptools]
 package-dir = {"binary_ninja_mcp" = "."}

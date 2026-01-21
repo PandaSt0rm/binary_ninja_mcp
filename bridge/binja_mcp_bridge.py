@@ -1076,7 +1076,7 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> dict:
 
     params = {"address": address, "data": data, "save_to_file": save_to_file}
     result = post_json("patch", params)
-    return _mcp_from_json(result, file=file, **params)
+    return _mcp_from_json(result, file=file, request_info=params)
 
 
 def _config_json(prefer_uv: bool, dev: bool, server_url: str) -> str:
