@@ -1,6 +1,7 @@
 """Tests for HTTP request functions in the bridge."""
 
 import responses
+
 from binary_ninja_mcp.bridge import binja_mcp_bridge
 
 SERVER_URL = "http://localhost:9009"

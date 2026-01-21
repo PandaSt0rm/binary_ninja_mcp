@@ -15,7 +15,7 @@ ignore = [
 ]
 
 [lint.isort]
-known-first-party = ["plugin", "bridge"]
+known-first-party = ["binary_ninja_mcp", "plugin", "bridge"]
 
 [lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py files
