@@ -1,8 +1,6 @@
 """Integration tests for MCP tool functions with mocked HTTP responses."""
 
-import pytest
 import responses
-
 from binary_ninja_mcp.bridge import binja_mcp_bridge
 
 # Use the same server URL as the bridge

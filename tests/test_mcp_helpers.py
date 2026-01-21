@@ -1,6 +1,5 @@
 """Unit tests for MCP bridge helper functions."""
 
-import pytest
 
 from binary_ninja_mcp.bridge import binja_mcp_bridge
 

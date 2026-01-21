@@ -3,9 +3,7 @@
 import re
 import urllib.parse
 
-import pytest
 import responses
-
 from binary_ninja_mcp.bridge import binja_mcp_bridge
 
 SERVER_URL = "http://localhost:9009"

@@ -1,8 +1,6 @@
 """Tests for HTTP request functions in the bridge."""
 
-import pytest
 import responses
-
 from binary_ninja_mcp.bridge import binja_mcp_bridge
 
 SERVER_URL = "http://localhost:9009"
@@ -206,7 +204,7 @@ class TestGetText:
             status=200,
         )
 
-        result = binja_mcp_bridge.get_text("test", {"address": "0x1000"})
+        binja_mcp_bridge.get_text("test", {"address": "0x1000"})
 
         assert "address=0x1000" in responses.calls[0].request.url
 

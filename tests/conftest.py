@@ -1,6 +1,5 @@
 """Shared pytest fixtures for MCP bridge testing."""
 
-import json
 import pytest
 import responses
 

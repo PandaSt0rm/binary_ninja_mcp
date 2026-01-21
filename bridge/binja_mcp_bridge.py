@@ -18,8 +18,8 @@ def _bridge_excepthook(exc_type, exc, tb):
 
 _sys.excepthook = _bridge_excepthook
 
-import requests
 import anyio
+import requests
 from mcp.server.fastmcp import FastMCP
 
 try:
