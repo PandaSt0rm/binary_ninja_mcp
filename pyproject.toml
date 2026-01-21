@@ -24,9 +24,11 @@ binary-ninja-mcp = "binary_ninja_mcp.bridge.binja_mcp_bridge:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "responses>=0.25.0",
+    "pre-commit~=4.5",
+    "pytest~=9.0",
+    "pytest-cov~=7.0",
+    "responses~=0.25",
+    "ruff~=0.14",
 ]
 
 [build-system]
