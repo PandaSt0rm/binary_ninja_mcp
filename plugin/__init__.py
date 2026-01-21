@@ -120,6 +120,10 @@ def _register_settings():
         '{ "title": "Rename Prefix", "type": "string", "default": "", "description": "Optional prefix to prepend to renamed functions and variables (e.g. mcp_, mw_)." }',
     )
     settings.register_setting(
+        "mcp.autoStart",
+        '{ "title": "Auto-start Server", "type": "boolean", "default": true, "description": "Automatically start the MCP server when a binary is opened." }',
+    )
+    settings.register_setting(
         "mcp.showStatusButton",
         '{ "title": "Show Status Button", "type": "boolean", "default": true, "description": "Show MCP server status button in the status bar." }',
     )
@@ -134,10 +138,32 @@ def _apply_settings_to_config():
 
 def _try_autostart_for_bv(bv):
     try:
+        if not bv:
+            return
+        try:
+            settings = Settings()
+            if not settings.get_bool("mcp.autoStart"):
+                return
+        except Exception:
+            pass
         # Respect manual stop; do not auto-start until user starts explicitly
         global _mcp_user_stopped
         if _mcp_user_stopped:
             bn.log_debug("MCP Max autostart suppressed due to manual stop")
+            return
+        # Avoid noisy "already running" popups/logs; just ensure we track the view.
+        if plugin.server and plugin.server.server:
+            try:
+                ops = plugin.server.binary_ops
+                if ops:
+                    if ops.current_view is None:
+                        ops.current_view = bv
+                    try:
+                        ops.register_view(bv)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return
         plugin.start_server(bv)
     except Exception as e:
@@ -573,6 +599,7 @@ def _start_bv_monitor():
                             ops.current_view = act_bv
                             if act_bv:
                                 ops.register_view(act_bv)
+                                _try_autostart_for_bv(act_bv)
                         except Exception:
                             # If UI is unavailable or no active view, leave as None
                             pass
@@ -786,6 +813,7 @@ try:
             # Ensure server exists; even if not running, register the view for listing later
             if plugin.server and plugin.server.binary_ops:
                 plugin.server.binary_ops.register_view(bv)
+            _try_autostart_for_bv(bv)
         except Exception:
             pass
 
