@@ -1,4 +1,5 @@
 import argparse as _argparse
+import functools as _functools
 import json as _json
 import os as _os
 import re as _re
@@ -18,6 +19,7 @@ def _bridge_excepthook(exc_type, exc, tb):
 _sys.excepthook = _bridge_excepthook
 
 import requests
+import anyio
 from mcp.server.fastmcp import FastMCP
 
 try:
@@ -35,6 +37,24 @@ except Exception:
 
 binja_server_url = resolve_server_url()
 mcp = FastMCP("binja-mcp")
+
+
+def tool(**tool_kwargs):
+    """Register a sync function as an MCP tool without blocking the event loop."""
+
+    def decorator(fn):
+        cfg = dict(tool_kwargs)
+        cfg.setdefault("name", fn.__name__)
+        cfg.setdefault("description", fn.__doc__ or "")
+
+        @mcp.tool(**cfg)
+        @_functools.wraps(fn)
+        async def _wrapper(*args, **kwargs):  # pragma: no cover - exercised via MCP runtime
+            return await _run_in_thread(fn, *args, **kwargs)
+
+        return fn
+
+    return decorator
 
 
 def _set_server_url(url: str):
@@ -58,6 +78,21 @@ def _retry_max_wait() -> float:
 
 def _retry_after_default() -> float:
     return _float_env("BINARY_NINJA_MCP_RETRY_AFTER", 5.0)
+
+
+def _status_timeout() -> float:
+    return _float_env("BINARY_NINJA_MCP_STATUS_TIMEOUT", 3.0)
+
+
+def _long_timeout() -> float:
+    return _float_env("BINARY_NINJA_MCP_LONG_TIMEOUT", 120.0)
+
+
+async def _run_in_thread(func, /, *args, **kwargs):
+    return await anyio.to_thread.run_sync(
+        _functools.partial(func, *args, **kwargs),
+        abandon_on_cancel=True,
+    )
 
 
 def _parse_retry_after(response) -> float:
@@ -105,7 +140,7 @@ def _request_with_retry(
 def _active_filename() -> str:
     """Return the currently active filename as known by the server."""
     try:
-        st = get_json("status")
+        st = get_json("status", timeout=_status_timeout())
         if isinstance(st, dict) and st.get("filename"):
             return str(st.get("filename"))
     except Exception:
@@ -350,7 +385,7 @@ def safe_post(endpoint: str, data: dict | str) -> str:
         return f"Request failed: {e!s}"
 
 
-@mcp.tool()
+@tool()
 def list_methods(offset: int = 0, limit: int = 100) -> dict:
     """List all function names in the program with pagination."""
 
@@ -368,7 +403,7 @@ def list_methods(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_entry_points() -> dict:
     """List entry point(s) of the loaded binary."""
 
@@ -377,7 +412,7 @@ def get_entry_points() -> dict:
     return _mcp_from_json(data, file=file)
 
 
-@mcp.tool()
+@tool()
 def retype_variable(function_name: str, variable_name: str, type_str: str) -> dict:
     """Retype a variable in a function."""
 
@@ -391,7 +426,7 @@ def retype_variable(function_name: str, variable_name: str, type_str: str) -> di
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def rename_single_variable(function_name: str, variable_name: str, new_name: str) -> dict:
     """Rename a variable in a function."""
 
@@ -405,7 +440,7 @@ def rename_single_variable(function_name: str, variable_name: str, new_name: str
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def rename_multi_variables(
     function_identifier: str,
     mapping_json: str = "",
@@ -451,7 +486,7 @@ def rename_multi_variables(
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def define_types(c_code: str) -> dict:
     """Define types from a C code string."""
 
@@ -460,7 +495,7 @@ def define_types(c_code: str) -> dict:
     return _mcp_from_json(data, file=file)
 
 
-@mcp.tool()
+@tool()
 def list_classes(offset: int = 0, limit: int = 100) -> dict:
     """List all namespace/class names in the program with pagination."""
 
@@ -478,7 +513,7 @@ def list_classes(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def hexdump_address(address: str, length: int = -1) -> dict:
     """Hexdump data starting at an address.
 
@@ -487,11 +522,11 @@ def hexdump_address(address: str, length: int = -1) -> dict:
 
     file = _active_filename()
     params = {"address": address, "length": length}
-    text = get_text("hexdump", params, timeout=None)
+    text = get_text("hexdump", params, timeout=_long_timeout())
     return _mcp_from_text(text, file=file, key="hexdump", **params)
 
 
-@mcp.tool()
+@tool()
 def hexdump_data(name_or_address: str, length: int = -1) -> dict:
     """Hexdump a data symbol by name or address."""
 
@@ -501,11 +536,11 @@ def hexdump_data(name_or_address: str, length: int = -1) -> dict:
 
     file = _active_filename()
     params = {"name": ident, "length": length}
-    text = get_text("hexdumpByName", params, timeout=None)
+    text = get_text("hexdumpByName", params, timeout=_long_timeout())
     return _mcp_from_text(text, file=file, key="hexdump", **params)
 
 
-@mcp.tool()
+@tool()
 def get_data_decl(name_or_address: str, length: int = -1) -> dict:
     """Return a declaration and a hexdump for a data symbol."""
 
@@ -515,20 +550,20 @@ def get_data_decl(name_or_address: str, length: int = -1) -> dict:
         {"name": ident} if not ident.startswith("0x") else {"address": ident}
     )
     params["length"] = length
-    data = get_json("getDataDecl", params, timeout=None)
+    data = get_json("getDataDecl", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def decompile_function(name: str) -> dict:
     """Decompile a specific function by name."""
 
     file = _active_filename()
-    data = get_json("decompile", {"name": name}, timeout=None)
+    data = get_json("decompile", {"name": name}, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, name=name)
 
 
-@mcp.tool()
+@tool()
 def get_il(name_or_address: str, view: str = "hlil", ssa: bool = False) -> dict:
     """Get IL for a function in the selected view."""
 
@@ -539,20 +574,20 @@ def get_il(name_or_address: str, view: str = "hlil", ssa: bool = False) -> dict:
         params["address"] = ident
     else:
         params["name"] = ident
-    data = get_json("il", params, timeout=None)
+    data = get_json("il", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, requested=name_or_address, view=view, ssa=ssa)
 
 
-@mcp.tool()
+@tool()
 def fetch_disassembly(name: str) -> dict:
     """Retrieve disassembly for a function by name."""
 
     file = _active_filename()
-    data = get_json("assembly", {"name": name}, timeout=None)
+    data = get_json("assembly", {"name": name}, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, name=name)
 
 
-@mcp.tool()
+@tool()
 def rename_function(old_name: str, new_name: str) -> dict:
     """Rename a function by its current name (or address) to a new user-defined name."""
 
@@ -562,7 +597,7 @@ def rename_function(old_name: str, new_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def rename_data(address: str, new_name: str) -> dict:
     """Rename a data label at the specified address."""
 
@@ -572,7 +607,7 @@ def rename_data(address: str, new_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def set_comment(address: str, comment: str) -> dict:
     """Set a comment at a specific address."""
 
@@ -582,7 +617,7 @@ def set_comment(address: str, comment: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def set_function_comment(function_name: str, comment: str) -> dict:
     """Set a comment for a function."""
 
@@ -592,7 +627,7 @@ def set_function_comment(function_name: str, comment: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_comment(address: str) -> dict:
     """Get the comment at a specific address."""
 
@@ -602,7 +637,7 @@ def get_comment(address: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_function_comment(function_name: str) -> dict:
     """Get the comment for a function."""
 
@@ -612,7 +647,7 @@ def get_function_comment(function_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_segments(offset: int = 0, limit: int = 100) -> dict:
     """List all memory segments in the program with pagination."""
 
@@ -630,7 +665,7 @@ def list_segments(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_sections(offset: int = 0, limit: int = 100) -> dict:
     """List sections in the program with pagination."""
 
@@ -648,7 +683,7 @@ def list_sections(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_imports(offset: int = 0, limit: int = 100) -> dict:
     """List imported symbols in the program with pagination."""
 
@@ -666,13 +701,13 @@ def list_imports(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_strings(offset: int = 0, count: int = 100) -> dict:
     """List strings in the database (paginated)."""
 
     file = _active_filename()
     params = {"offset": offset, "limit": count}
-    data = get_json("strings", params, timeout=None)
+    data = get_json("strings", params, timeout=_long_timeout())
     if isinstance(data, dict) and "error" not in data:
         return _mcp_result(
             ok=True,
@@ -684,13 +719,13 @@ def list_strings(offset: int = 0, count: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_strings_filter(offset: int = 0, count: int = 100, filter: str = "") -> dict:
     """List matching strings in the database (paginated, filtered)."""
 
     file = _active_filename()
     params = {"offset": offset, "limit": count, "filter": filter}
-    data = get_json("strings/filter", params, timeout=None)
+    data = get_json("strings/filter", params, timeout=_long_timeout())
     if isinstance(data, dict) and "error" not in data:
         return _mcp_result(
             ok=True,
@@ -704,7 +739,7 @@ def list_strings_filter(offset: int = 0, count: int = 100, filter: str = "") -> 
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_local_types(offset: int = 0, count: int = 200, include_libraries: bool = False) -> dict:
     """List local types in the database (paginated)."""
 
@@ -714,7 +749,7 @@ def list_local_types(offset: int = 0, count: int = 200, include_libraries: bool 
         "limit": count,
         "includeLibraries": int(bool(include_libraries)),
     }
-    data = get_json("localTypes", params, timeout=None)
+    data = get_json("localTypes", params, timeout=_long_timeout())
     if isinstance(data, dict) and "error" not in data:
         return _mcp_result(
             ok=True,
@@ -727,7 +762,7 @@ def list_local_types(offset: int = 0, count: int = 200, include_libraries: bool 
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def search_types(
     query: str, offset: int = 0, count: int = 200, include_libraries: bool = False
 ) -> dict:
@@ -740,7 +775,7 @@ def search_types(
         "limit": count,
         "includeLibraries": int(bool(include_libraries)),
     }
-    data = get_json("searchTypes", params, timeout=None)
+    data = get_json("searchTypes", params, timeout=_long_timeout())
     if isinstance(data, dict) and "error" not in data:
         return _mcp_result(
             ok=True,
@@ -755,18 +790,18 @@ def search_types(
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_all_strings() -> dict:
     """List all strings in the database (no pagination)."""
 
     file = _active_filename()
-    data = get_json("allStrings", timeout=None)
+    data = get_json("allStrings", timeout=_long_timeout())
     if isinstance(data, dict) and "error" not in data:
         return _mcp_result(ok=True, file=file, strings=data.get("strings", []) or [])
     return _mcp_from_json(data, file=file)
 
 
-@mcp.tool()
+@tool()
 def list_exports(offset: int = 0, limit: int = 100) -> dict:
     """List exported functions/symbols with pagination."""
 
@@ -784,7 +819,7 @@ def list_exports(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_namespaces(offset: int = 0, limit: int = 100) -> dict:
     """List all non-global namespaces in the program with pagination."""
 
@@ -802,7 +837,7 @@ def list_namespaces(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_data_items(offset: int = 0, limit: int = 100) -> dict:
     """List defined data labels and their values with pagination."""
 
@@ -816,7 +851,7 @@ def list_data_items(offset: int = 0, limit: int = 100) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def search_functions_by_name(query: str, offset: int = 0, limit: int = 100) -> dict:
     """Search for functions whose name contains the given substring."""
 
@@ -838,31 +873,31 @@ def search_functions_by_name(query: str, offset: int = 0, limit: int = 100) -> d
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_binary_status() -> dict:
     """Get the current status of the loaded binary."""
 
-    data = get_json("status")
+    data = get_json("status", timeout=_status_timeout())
     return _mcp_from_json(data, file="(none)")
 
 
-@mcp.tool()
+@tool()
 def list_binaries() -> dict:
     """List managed/open binaries known to the server with ids and active flag."""
 
-    data = get_json("binaries")
+    data = get_json("binaries", timeout=_status_timeout())
     return _mcp_from_json(data, file="(none)")
 
 
-@mcp.tool()
+@tool()
 def select_binary(view: str) -> dict:
     """Select which binary to analyze by id, filename, or basename."""
 
-    data = get_json("selectBinary", {"view": view})
+    data = get_json("selectBinary", {"view": view}, timeout=_long_timeout())
     return _mcp_from_json(data, file="(none)", view=view)
 
 
-@mcp.tool()
+@tool()
 def delete_comment(address: str) -> dict:
     """Delete the comment at a specific address."""
 
@@ -872,7 +907,7 @@ def delete_comment(address: str) -> dict:
     return _mcp_from_json(data, file=file, address=address)
 
 
-@mcp.tool()
+@tool()
 def delete_function_comment(function_name: str) -> dict:
     """Delete the comment for a function."""
 
@@ -882,7 +917,7 @@ def delete_function_comment(function_name: str) -> dict:
     return _mcp_from_json(data, file=file, name=function_name)
 
 
-@mcp.tool()
+@tool()
 def function_at(address: str) -> dict:
     """Retrieve the name(s) of the function(s) containing an address."""
 
@@ -892,7 +927,7 @@ def function_at(address: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_user_defined_type(type_name: str) -> dict:
     """Retrieve a user-defined type definition (struct/enum/typedef/union)."""
 
@@ -902,7 +937,7 @@ def get_user_defined_type(type_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_xrefs_to(address: str) -> dict:
     """Get all cross references (code and data) to an address."""
 
@@ -912,7 +947,7 @@ def get_xrefs_to(address: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_xrefs_to_field(struct_name: str, field_name: str) -> dict:
     """Get cross references to a named struct field (member)."""
 
@@ -922,7 +957,7 @@ def get_xrefs_to_field(struct_name: str, field_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_xrefs_to_struct(struct_name: str) -> dict:
     """Get cross references/usages related to a struct name."""
 
@@ -932,7 +967,7 @@ def get_xrefs_to_struct(struct_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_xrefs_to_type(type_name: str) -> dict:
     """Get xrefs/usages related to a struct or type name."""
 
@@ -942,7 +977,7 @@ def get_xrefs_to_type(type_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_xrefs_to_enum(enum_name: str) -> dict:
     """Get usages/xrefs of an enum by scanning for member values and matches."""
 
@@ -952,7 +987,7 @@ def get_xrefs_to_enum(enum_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_xrefs_to_union(union_name: str) -> dict:
     """Get cross references/usages related to a union type by name."""
 
@@ -962,7 +997,7 @@ def get_xrefs_to_union(union_name: str) -> dict:
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def get_stack_frame_vars(function_identifier: str) -> dict:
     """Get stack frame variable information for a function by name or address."""
 
@@ -974,40 +1009,40 @@ def get_stack_frame_vars(function_identifier: str) -> dict:
     else:
         params["name"] = ident
 
-    data = get_json("getStackFrameVars", params)
+    data = get_json("getStackFrameVars", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, identifier=function_identifier)
 
 
-@mcp.tool()
+@tool()
 def format_value(address: str, text: str, size: int = 0) -> dict:
     """Convert and annotate a value at an address in Binary Ninja."""
 
     file = _active_filename()
     params = {"address": address, "text": text, "size": size}
-    data = get_json("formatValue", params, timeout=None)
+    data = get_json("formatValue", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def convert_number(text: str, size: int = 0) -> dict:
     """Convert a number/string to multiple representations (hex/dec/bin, LE/BE, C literals)."""
 
     params = {"text": text, "size": size}
-    data = get_json("convertNumber", params, timeout=None)
+    data = get_json("convertNumber", params, timeout=_long_timeout())
     return _mcp_from_json(data, file="(none)", **params)
 
 
-@mcp.tool()
+@tool()
 def get_type_info(type_name: str) -> dict:
     """Resolve a type name and return its declaration and details."""
 
     file = _active_filename()
     params = {"name": type_name}
-    data = get_json("getTypeInfo", params, timeout=None)
+    data = get_json("getTypeInfo", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def set_function_prototype(name_or_address: str, prototype: str) -> dict:
     """Set a function's prototype by name or address."""
 
@@ -1019,11 +1054,11 @@ def set_function_prototype(name_or_address: str, prototype: str) -> dict:
     else:
         params["name"] = ident
 
-    data = post_json("setFunctionPrototype", params)
+    data = post_json("setFunctionPrototype", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, requested=name_or_address)
 
 
-@mcp.tool()
+@tool()
 def make_function_at(address: str, platform: str = "") -> dict:
     """Create a function at the given address."""
 
@@ -1031,28 +1066,28 @@ def make_function_at(address: str, platform: str = "") -> dict:
     params: dict[str, object] = {"address": address}
     if platform:
         params["platform"] = platform
-    data = get_json("makeFunctionAt", params)
+    data = get_json("makeFunctionAt", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def list_platforms() -> dict:
     """List all available platform names from Binary Ninja."""
 
-    data = get_json("platforms")
+    data = get_json("platforms", timeout=_status_timeout())
     return _mcp_from_json(data, file="(none)")
 
 
-@mcp.tool()
+@tool()
 def declare_c_type(c_declaration: str) -> dict:
     """Create or update a local type from a C declaration."""
 
     file = _active_filename()
-    data = post_json("declareCType", {"declaration": c_declaration})
+    data = post_json("declareCType", {"declaration": c_declaration}, timeout=_long_timeout())
     return _mcp_from_json(data, file=file)
 
 
-@mcp.tool()
+@tool()
 def set_local_variable_type(function_address: str, variable_name: str, new_type: str) -> dict:
     """Set a local variable's type."""
 
@@ -1062,11 +1097,11 @@ def set_local_variable_type(function_address: str, variable_name: str, new_type:
         "variableName": variable_name,
         "newType": new_type,
     }
-    data = get_json("setLocalVariableType", params)
+    data = get_json("setLocalVariableType", params, timeout=_long_timeout())
     return _mcp_from_json(data, file=file, **params)
 
 
-@mcp.tool()
+@tool()
 def patch_bytes(address: str, data: str, save_to_file: bool = True) -> dict:
     """Patch bytes at a given address in the binary."""
 
@@ -1075,7 +1110,7 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> dict:
         save_to_file = save_to_file.lower() not in ("false", "0", "no")
 
     params = {"address": address, "data": data, "save_to_file": save_to_file}
-    result = post_json("patch", params)
+    result = post_json("patch", params, timeout=_long_timeout())
     return _mcp_from_json(result, file=file, request_info=params)
 
 
