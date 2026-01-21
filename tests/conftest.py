@@ -109,6 +109,7 @@ def add_text():
 # These fixtures provide sample data that matches the purpose-built test binary
 # located at tests/fixtures/test_binary
 
+
 @pytest.fixture
 def test_binary_functions():
     """Sample function data matching tests/fixtures/test_binary."""
@@ -118,7 +119,11 @@ def test_binary_functions():
         {"name": "helper_calculate", "address": "0x11b8", "raw_name": "helper_calculate"},
         {"name": "helper_print_string", "address": "0x11f2", "raw_name": "helper_print_string"},
         {"name": "helper_init_record", "address": "0x1226", "raw_name": "helper_init_record"},
-        {"name": "helper_status_to_string", "address": "0x127c", "raw_name": "helper_status_to_string"},
+        {
+            "name": "helper_status_to_string",
+            "address": "0x127c",
+            "raw_name": "helper_status_to_string",
+        },
         {"name": "helper_dump_value", "address": "0x12c8", "raw_name": "helper_dump_value"},
         {"name": "process_loop_simple", "address": "0x1328", "raw_name": "process_loop_simple"},
         {"name": "process_loop_nested", "address": "0x1358", "raw_name": "process_loop_nested"},
@@ -148,11 +153,26 @@ def test_binary_strings():
 def test_binary_types():
     """Sample type data matching tests/fixtures/test_binary."""
     return [
-        {"name": "StatusCode", "declaration": "enum StatusCode { STATUS_OK = 0, STATUS_ERROR = 1, STATUS_PENDING = 2, STATUS_TIMEOUT = 3 };"},
-        {"name": "TestRecord", "declaration": "struct TestRecord { int32_t id; char name[32]; StatusCode status; uint32_t flags; };"},
-        {"name": "TestContainer", "declaration": "struct TestContainer { TestRecord record; void* data; size_t data_size; struct { uint8_t priority; uint8_t reserved[3]; } metadata; };"},
-        {"name": "ValueUnion", "declaration": "union ValueUnion { uint32_t as_u32; int32_t as_i32; float as_float; uint8_t as_bytes[4]; };"},
-        {"name": "ProcessCallback", "declaration": "typedef int (*ProcessCallback)(TestRecord*, void*);"},
+        {
+            "name": "StatusCode",
+            "declaration": "enum StatusCode { STATUS_OK = 0, STATUS_ERROR = 1, STATUS_PENDING = 2, STATUS_TIMEOUT = 3 };",
+        },
+        {
+            "name": "TestRecord",
+            "declaration": "struct TestRecord { int32_t id; char name[32]; StatusCode status; uint32_t flags; };",
+        },
+        {
+            "name": "TestContainer",
+            "declaration": "struct TestContainer { TestRecord record; void* data; size_t data_size; struct { uint8_t priority; uint8_t reserved[3]; } metadata; };",
+        },
+        {
+            "name": "ValueUnion",
+            "declaration": "union ValueUnion { uint32_t as_u32; int32_t as_i32; float as_float; uint8_t as_bytes[4]; };",
+        },
+        {
+            "name": "ProcessCallback",
+            "declaration": "typedef int (*ProcessCallback)(TestRecord*, void*);",
+        },
     ]
 
 

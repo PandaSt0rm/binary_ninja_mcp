@@ -169,7 +169,7 @@ def _wait_for_mcp_ready() -> None:
     pytest.fail(
         f"MCP server not ready at {SERVER_URL}: {last_error}. "
         "Start the MCP server, load tests/fixtures/test_binary, or run "
-        "pytest -m \"not integration\"."
+        'pytest -m "not integration".'
     )
 
 
@@ -184,6 +184,7 @@ pytestmark = pytest.mark.integration
 # =============================================================================
 # Fixtures for known test binary features
 # =============================================================================
+
 
 @pytest.fixture
 def helper_add_function():
@@ -219,6 +220,7 @@ def process_many_locals_function():
 # Function Discovery Tests
 # =============================================================================
 
+
 class TestKnownFunctions:
     """Tests that verify known functions are discoverable."""
 
@@ -250,7 +252,9 @@ class TestKnownFunctions:
 
         process_names = {m["name"] for m in result["matches"]}
         expected = {"process_loop_simple", "process_conditional", "process_switch"}
-        assert expected.issubset(process_names), f"Missing process functions: {expected - process_names}"
+        assert expected.issubset(process_names), (
+            f"Missing process functions: {expected - process_names}"
+        )
 
     def test_search_public_api_functions(self):
         """search_functions_by_name should find public_api_ functions."""
@@ -259,13 +263,18 @@ class TestKnownFunctions:
         assert len(result["matches"]) >= 3
 
         api_names = {m["name"] for m in result["matches"]}
-        expected = {"public_api_function_one", "public_api_function_two", "public_api_function_three"}
+        expected = {
+            "public_api_function_one",
+            "public_api_function_two",
+            "public_api_function_three",
+        }
         assert expected.issubset(api_names)
 
 
 # =============================================================================
 # Decompilation Tests
 # =============================================================================
+
 
 class TestDecompilationKnown:
     """Tests for decompiling known functions."""
@@ -310,6 +319,7 @@ class TestDecompilationKnown:
 # IL Tests
 # =============================================================================
 
+
 class TestILKnown:
     """Tests for IL views of known functions."""
 
@@ -333,7 +343,9 @@ class TestILKnown:
 
     def test_ssa_form(self, helper_add_function):
         """Get SSA form IL."""
-        result = binja_mcp_bridge.get_il(name_or_address=helper_add_function["name"], view="hlil", ssa=True)
+        result = binja_mcp_bridge.get_il(
+            name_or_address=helper_add_function["name"], view="hlil", ssa=True
+        )
         assert result["ok"] is True
 
     def test_il_by_address(self, helper_add_function):
@@ -346,6 +358,7 @@ class TestILKnown:
 # =============================================================================
 # Disassembly Tests
 # =============================================================================
+
 
 class TestDisassemblyKnown:
     """Tests for disassembly of known functions."""
@@ -369,6 +382,7 @@ class TestDisassemblyKnown:
 # Stack Frame Variable Tests
 # =============================================================================
 
+
 class TestStackFrameVarsKnown:
     """Tests for stack frame variables in known functions."""
 
@@ -380,14 +394,18 @@ class TestStackFrameVarsKnown:
         # The response structure varies - may be nested or flat
         # With optimization, variables may be in registers rather than stack
         # Just verify we get a valid response with some structure
-        has_vars = "variables" in result or "stack_frame_vars" in result or any(
-            "vars" in str(v) for v in result.values() if isinstance(v, (list, dict))
+        has_vars = (
+            "variables" in result
+            or "stack_frame_vars" in result
+            or any("vars" in str(v) for v in result.values() if isinstance(v, (list, dict)))
         )
         assert has_vars or result["ok"], "Expected stack frame info in response"
 
     def test_helper_add_has_result_var(self, helper_add_function):
         """helper_add should have a result variable."""
-        result = binja_mcp_bridge.get_stack_frame_vars(function_identifier=helper_add_function["name"])
+        result = binja_mcp_bridge.get_stack_frame_vars(
+            function_identifier=helper_add_function["name"]
+        )
         assert result["ok"] is True
 
 
@@ -395,12 +413,15 @@ class TestStackFrameVarsKnown:
 # String Tests
 # =============================================================================
 
+
 class TestStringsKnown:
     """Tests for known strings in the binary."""
 
     def test_find_unique_marker_alpha(self):
         """list_strings_filter should find UNIQUE_MARKER_ALPHA."""
-        result = binja_mcp_bridge.list_strings_filter(filter="UNIQUE_MARKER_ALPHA", offset=0, count=100)
+        result = binja_mcp_bridge.list_strings_filter(
+            filter="UNIQUE_MARKER_ALPHA", offset=0, count=100
+        )
         assert result["ok"] is True
 
         strings = result.get("strings", [])
@@ -409,7 +430,9 @@ class TestStringsKnown:
 
     def test_find_unique_marker_beta(self):
         """list_strings_filter should find UNIQUE_MARKER_BETA."""
-        result = binja_mcp_bridge.list_strings_filter(filter="UNIQUE_MARKER_BETA", offset=0, count=100)
+        result = binja_mcp_bridge.list_strings_filter(
+            filter="UNIQUE_MARKER_BETA", offset=0, count=100
+        )
         assert result["ok"] is True
 
         strings = result.get("strings", [])
@@ -434,6 +457,7 @@ class TestStringsKnown:
 # Cross-Reference Tests
 # =============================================================================
 
+
 class TestXrefsKnown:
     """Tests for cross-references in known functions."""
 
@@ -446,10 +470,10 @@ class TestXrefsKnown:
         # Xrefs may be in various response fields depending on server version
         # The important thing is the call succeeds and returns structured data
         has_xref_data = (
-            "xrefs" in result or
-            "code_references" in result or
-            "data_references" in result or
-            "references" in result
+            "xrefs" in result
+            or "code_references" in result
+            or "data_references" in result
+            or "references" in result
         )
         assert has_xref_data, f"Expected xref data in response, got keys: {result.keys()}"
 
@@ -468,6 +492,7 @@ class TestXrefsKnown:
 # =============================================================================
 # Data Analysis Tests
 # =============================================================================
+
 
 class TestDataAnalysisKnown:
     """Tests for data analysis with known data items."""
@@ -492,6 +517,7 @@ class TestDataAnalysisKnown:
 # =============================================================================
 # Import/Export Tests
 # =============================================================================
+
 
 class TestImportsExportsKnown:
     """Tests for imports and exports in test binary."""
@@ -523,6 +549,7 @@ class TestImportsExportsKnown:
 # Segment and Section Tests
 # =============================================================================
 
+
 class TestSegmentsSectionsKnown:
     """Tests for segments and sections."""
 
@@ -536,8 +563,7 @@ class TestSegmentsSectionsKnown:
 
         # Should have executable segment
         has_exec = any(
-            s.get("executable", False) or "x" in str(s.get("flags", "")).lower()
-            for s in segments
+            s.get("executable", False) or "x" in str(s.get("flags", "")).lower() for s in segments
         )
         assert has_exec, "No executable segment found"
 
@@ -558,6 +584,7 @@ class TestSegmentsSectionsKnown:
 # Entry Point Tests
 # =============================================================================
 
+
 class TestEntryPointsKnown:
     """Tests for entry points."""
 
@@ -573,6 +600,7 @@ class TestEntryPointsKnown:
 # =============================================================================
 # Comment Tests (Modification)
 # =============================================================================
+
 
 class TestCommentsKnown:
     """Tests for setting/getting comments on known locations."""
@@ -602,7 +630,9 @@ class TestCommentsKnown:
         test_comment = "Function comment for helper_add"
 
         # Set function comment
-        set_result = binja_mcp_bridge.set_function_comment(function_name=func_name, comment=test_comment)
+        set_result = binja_mcp_bridge.set_function_comment(
+            function_name=func_name, comment=test_comment
+        )
         assert set_result["ok"] is True
 
         # Get function comment
@@ -618,13 +648,16 @@ class TestCommentsKnown:
 # Variable Rename Tests (Modification)
 # =============================================================================
 
+
 class TestVariableRenameKnown:
     """Tests for renaming variables in known functions."""
 
     def test_rename_variable_in_process_many_locals(self, process_many_locals_function):
         """Rename a variable in process_many_locals."""
         # First get variables
-        vars_result = binja_mcp_bridge.get_stack_frame_vars(function_identifier="process_many_locals")
+        vars_result = binja_mcp_bridge.get_stack_frame_vars(
+            function_identifier="process_many_locals"
+        )
         if not vars_result["ok"]:
             pytest.skip("Cannot get stack frame vars")
 
@@ -638,9 +671,7 @@ class TestVariableRenameKnown:
             pytest.skip("Variable has no name to rename")
         new_name = "test_renamed_var"
         result = binja_mcp_bridge.rename_single_variable(
-            function_name="process_many_locals",
-            variable_name=var_name,
-            new_name=new_name
+            function_name="process_many_locals", variable_name=var_name, new_name=new_name
         )
         assert_ok(result)
         restore = binja_mcp_bridge.rename_single_variable(
@@ -654,6 +685,7 @@ class TestVariableRenameKnown:
 # =============================================================================
 # Function Rename Tests (Modification)
 # =============================================================================
+
 
 class TestFunctionRenameKnown:
     """Tests for renaming known functions."""
@@ -673,13 +705,16 @@ class TestFunctionRenameKnown:
         assert rename_result["ok"] is True
 
         # Restore
-        restore_result = binja_mcp_bridge.rename_function(old_name=temp_name, new_name=original_name)
+        restore_result = binja_mcp_bridge.rename_function(
+            old_name=temp_name, new_name=original_name
+        )
         assert restore_result["ok"] is True
 
 
 # =============================================================================
 # Type System Tests
 # =============================================================================
+
 
 class TestTypeSystemKnown:
     """Tests for type system operations."""
@@ -727,6 +762,7 @@ class TestTypeSystemKnown:
 # Utility Tests
 # =============================================================================
 
+
 class TestUtilitiesKnown:
     """Tests for utility functions."""
 
@@ -752,6 +788,7 @@ class TestUtilitiesKnown:
 # =============================================================================
 # Binary Management Tests
 # =============================================================================
+
 
 class TestBinaryManagementKnown:
     """Tests for binary management."""
@@ -781,12 +818,15 @@ class TestBinaryManagementKnown:
 # Multi-Variable Rename Tests
 # =============================================================================
 
+
 class TestMultiVariableRenameKnown:
     """Tests for renaming multiple variables."""
 
     def test_rename_multi_with_json(self, process_many_locals_function):
         """Rename multiple variables using JSON mapping."""
-        vars_result = binja_mcp_bridge.get_stack_frame_vars(function_identifier="process_many_locals")
+        vars_result = binja_mcp_bridge.get_stack_frame_vars(
+            function_identifier="process_many_locals"
+        )
         if not vars_result.get("ok"):
             pytest.skip("Cannot get stack frame vars")
 
@@ -798,8 +838,7 @@ class TestMultiVariableRenameKnown:
         new_names = ["test_multi_a", "test_multi_b"]
         mapping = {names[0]: new_names[0], names[1]: new_names[1]}
         result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="process_many_locals",
-            mapping_json=json.dumps(mapping)
+            function_identifier="process_many_locals", mapping_json=json.dumps(mapping)
         )
         assert_ok(result)
         results = result.get("results", [])
@@ -822,7 +861,9 @@ class TestMultiVariableRenameKnown:
 
     def test_rename_multi_with_pairs(self, process_many_locals_function):
         """Rename multiple variables using pairs format."""
-        vars_result = binja_mcp_bridge.get_stack_frame_vars(function_identifier="process_many_locals")
+        vars_result = binja_mcp_bridge.get_stack_frame_vars(
+            function_identifier="process_many_locals"
+        )
         if not vars_result.get("ok"):
             pytest.skip("Cannot get stack frame vars")
 
@@ -834,8 +875,7 @@ class TestMultiVariableRenameKnown:
         old_a, old_b = names[0], names[1]
         new_a, new_b = "test_pairs_c", "test_pairs_d"
         result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="process_many_locals",
-            pairs=f"{old_a}:{new_a},{old_b}:{new_b}"
+            function_identifier="process_many_locals", pairs=f"{old_a}:{new_a},{old_b}:{new_b}"
         )
         assert_ok(result)
         restore = binja_mcp_bridge.rename_multi_variables(
@@ -849,6 +889,7 @@ class TestMultiVariableRenameKnown:
 # Function Prototype Tests
 # =============================================================================
 
+
 class TestFunctionPrototypeKnown:
     """Tests for setting function prototypes."""
 
@@ -856,8 +897,7 @@ class TestFunctionPrototypeKnown:
         """Set prototype for helper_add."""
         func_name = helper_add_function["name"]
         result = binja_mcp_bridge.set_function_prototype(
-            name_or_address=func_name,
-            prototype=f"int {func_name}(int a, int b)"
+            name_or_address=func_name, prototype=f"int {func_name}(int a, int b)"
         )
         assert_ok(result)
         assert result.get("applied_type")
@@ -867,8 +907,7 @@ class TestFunctionPrototypeKnown:
         address = helper_add_function["address"]
         func_name = helper_add_function["name"]
         result = binja_mcp_bridge.set_function_prototype(
-            name_or_address=address,
-            prototype=f"int32_t {func_name}(int32_t, int32_t)"
+            name_or_address=address, prototype=f"int32_t {func_name}(int32_t, int32_t)"
         )
         assert_ok(result)
         assert result.get("applied_type")
@@ -877,6 +916,7 @@ class TestFunctionPrototypeKnown:
 # =============================================================================
 # Advanced IL Tests
 # =============================================================================
+
 
 class TestAdvancedILKnown:
     """Advanced IL tests for complex functions."""
@@ -892,7 +932,9 @@ class TestAdvancedILKnown:
 
     def test_mlil_ssa_process_conditional(self):
         """MLIL SSA for conditional function."""
-        result = binja_mcp_bridge.get_il(name_or_address="process_conditional", view="mlil", ssa=True)
+        result = binja_mcp_bridge.get_il(
+            name_or_address="process_conditional", view="mlil", ssa=True
+        )
         assert result["ok"] is True
 
     def test_llil_create_container(self):
@@ -904,6 +946,7 @@ class TestAdvancedILKnown:
 # =============================================================================
 # Cross-Reference Type Tests
 # =============================================================================
+
 
 class TestXrefTypesKnown:
     """Tests for type-based cross-references."""
@@ -932,6 +975,7 @@ class TestXrefTypesKnown:
 # Function At Address Tests
 # =============================================================================
 
+
 class TestFunctionAtKnown:
     """Tests for function_at with known addresses."""
 
@@ -956,6 +1000,7 @@ class TestFunctionAtKnown:
 # =============================================================================
 # Additional Data Analysis Tests (100% coverage)
 # =============================================================================
+
 
 class TestHexdumpDataKnown:
     """Tests for hexdump_data MCP tool."""
@@ -1026,6 +1071,7 @@ class TestRenameDataKnown:
 # String Tests (Additional for 100% coverage)
 # =============================================================================
 
+
 class TestListStringsBasicKnown:
     """Tests for list_strings MCP tool (without filter)."""
 
@@ -1049,6 +1095,7 @@ class TestListStringsBasicKnown:
 # =============================================================================
 # Namespace and Class Tests (100% coverage)
 # =============================================================================
+
 
 class TestListClassesKnown:
     """Tests for list_classes MCP tool."""
@@ -1081,6 +1128,7 @@ class TestListNamespacesKnown:
 # User-Defined Type Tests (100% coverage)
 # =============================================================================
 
+
 class TestGetUserDefinedTypeKnown:
     """Tests for get_user_defined_type MCP tool."""
 
@@ -1107,6 +1155,7 @@ class TestGetUserDefinedTypeKnown:
 # Additional Cross-Reference Tests (100% coverage)
 # =============================================================================
 
+
 class TestGetXrefsToFieldKnown:
     """Tests for get_xrefs_to_field MCP tool."""
 
@@ -1118,7 +1167,9 @@ class TestGetXrefsToFieldKnown:
 
     def test_get_xrefs_to_field_nonexistent(self):
         """get_xrefs_to_field should handle nonexistent field."""
-        result = binja_mcp_bridge.get_xrefs_to_field(struct_name="TestRecord", field_name="nonexistent_field")
+        result = binja_mcp_bridge.get_xrefs_to_field(
+            struct_name="TestRecord", field_name="nonexistent_field"
+        )
         assert_ok(result)
 
 
@@ -1142,13 +1193,16 @@ class TestGetXrefsToTypeKnown:
 # Variable Type Tests (100% coverage)
 # =============================================================================
 
+
 class TestRetypeVariableKnown:
     """Tests for retype_variable MCP tool."""
 
     def test_retype_variable(self, process_many_locals_function):
         """retype_variable should change variable type."""
         # Get variables first
-        vars_result = binja_mcp_bridge.get_stack_frame_vars(function_identifier="process_many_locals")
+        vars_result = binja_mcp_bridge.get_stack_frame_vars(
+            function_identifier="process_many_locals"
+        )
         if not vars_result["ok"]:
             pytest.skip("Cannot get stack frame vars")
 
@@ -1160,9 +1214,7 @@ class TestRetypeVariableKnown:
         if not var_name:
             pytest.skip("Variable has no name to retype")
         result = binja_mcp_bridge.retype_variable(
-            function_name="process_many_locals",
-            variable_name=var_name,
-            type_str="int32_t"
+            function_name="process_many_locals", variable_name=var_name, type_str="int32_t"
         )
         assert_ok(result)
 
@@ -1175,7 +1227,9 @@ class TestSetLocalVariableTypeKnown:
         address = process_many_locals_function["address"]
 
         # Get variables to find a valid name
-        vars_result = binja_mcp_bridge.get_stack_frame_vars(function_identifier="process_many_locals")
+        vars_result = binja_mcp_bridge.get_stack_frame_vars(
+            function_identifier="process_many_locals"
+        )
         if not vars_result["ok"]:
             pytest.skip("Cannot get stack frame vars")
 
@@ -1187,9 +1241,7 @@ class TestSetLocalVariableTypeKnown:
         if not var_name:
             pytest.skip("Variable has no name to retype")
         result = binja_mcp_bridge.set_local_variable_type(
-            function_address=address,
-            variable_name=var_name,
-            new_type="uint32_t"
+            function_address=address, variable_name=var_name, new_type="uint32_t"
         )
         assert_ok(result)
 
@@ -1197,6 +1249,7 @@ class TestSetLocalVariableTypeKnown:
 # =============================================================================
 # Function Creation Tests (100% coverage)
 # =============================================================================
+
 
 class TestMakeFunctionAtKnown:
     """Tests for make_function_at MCP tool."""
@@ -1230,6 +1283,7 @@ class TestListPlatformsKnown:
 # Patch Bytes Tests (100% coverage)
 # =============================================================================
 
+
 class TestPatchBytesKnown:
     """Tests for patch_bytes MCP tool."""
 
@@ -1243,11 +1297,7 @@ class TestPatchBytesKnown:
             pytest.skip("Cannot read bytes")
 
         # Patch with NOPs without saving (safe operation)
-        result = binja_mcp_bridge.patch_bytes(
-            address=address,
-            data="90909090",
-            save_to_file=False
-        )
+        result = binja_mcp_bridge.patch_bytes(address=address, data="90909090", save_to_file=False)
         assert_ok(result)
         original_bytes = result.get("original_bytes")
         if original_bytes:
@@ -1265,7 +1315,7 @@ class TestPatchBytesKnown:
         result = binja_mcp_bridge.patch_bytes(
             address=address,
             data="90",  # NOP is safer than INT3
-            save_to_file=False
+            save_to_file=False,
         )
         assert_ok(result)
         original_bytes = result.get("original_bytes")
@@ -1281,6 +1331,7 @@ class TestPatchBytesKnown:
 # =============================================================================
 # Local Types Additional Tests (100% coverage)
 # =============================================================================
+
 
 class TestListLocalTypesAdvanced:
     """Additional tests for list_local_types MCP tool."""
@@ -1343,12 +1394,16 @@ class TestRobustnessInvalidFunctionNames:
 
     def test_rename_function_nonexistent(self):
         """rename_function should fail for nonexistent source function."""
-        result = binja_mcp_bridge.rename_function(old_name="__nonexistent_xyz__", new_name="new_name")
+        result = binja_mcp_bridge.rename_function(
+            old_name="__nonexistent_xyz__", new_name="new_name"
+        )
         assert result["ok"] is False
 
     def test_set_function_comment_nonexistent(self):
         """set_function_comment should fail for nonexistent function."""
-        result = binja_mcp_bridge.set_function_comment(function_name="__nonexistent_xyz__", comment="test")
+        result = binja_mcp_bridge.set_function_comment(
+            function_name="__nonexistent_xyz__", comment="test"
+        )
         assert result["ok"] is False
 
     def test_get_function_comment_nonexistent(self):
@@ -1360,8 +1415,7 @@ class TestRobustnessInvalidFunctionNames:
     def test_set_function_prototype_nonexistent(self):
         """set_function_prototype should fail for nonexistent function."""
         result = binja_mcp_bridge.set_function_prototype(
-            name_or_address="__nonexistent_xyz__",
-            prototype="void foo(void)"
+            name_or_address="__nonexistent_xyz__", prototype="void foo(void)"
         )
         assert result["ok"] is False
 
@@ -1405,9 +1459,7 @@ class TestRobustnessInvalidAddresses:
     def test_patch_bytes_invalid_address(self):
         """patch_bytes should handle invalid address."""
         result = binja_mcp_bridge.patch_bytes(
-            address="not_an_address",
-            data="90",
-            save_to_file=False
+            address="not_an_address", data="90", save_to_file=False
         )
         assert_not_ok(result)
 
@@ -1601,7 +1653,9 @@ class TestRobustnessInvalidTypes:
 
     def test_retype_variable_invalid_type(self):
         """retype_variable should handle invalid type string."""
-        vars_result = binja_mcp_bridge.get_stack_frame_vars(function_identifier="process_many_locals")
+        vars_result = binja_mcp_bridge.get_stack_frame_vars(
+            function_identifier="process_many_locals"
+        )
         if not vars_result.get("ok"):
             pytest.skip("Cannot get stack frame vars")
 
@@ -1613,15 +1667,14 @@ class TestRobustnessInvalidTypes:
         result = binja_mcp_bridge.retype_variable(
             function_name="process_many_locals",
             variable_name=names[0],
-            type_str="invalid_type_xyz_123"
+            type_str="invalid_type_xyz_123",
         )
         assert_not_ok(result)
 
     def test_set_function_prototype_invalid(self):
         """set_function_prototype should handle invalid prototype."""
         result = binja_mcp_bridge.set_function_prototype(
-            name_or_address="helper_add",
-            prototype="this is not a valid prototype"
+            name_or_address="helper_add", prototype="this is not a valid prototype"
         )
         assert_not_ok(result)
 
@@ -1650,42 +1703,34 @@ class TestRobustnessInvalidVariables:
     def test_rename_single_variable_nonexistent_var(self):
         """rename_single_variable should handle nonexistent variable."""
         result = binja_mcp_bridge.rename_single_variable(
-            function_name="helper_add",
-            variable_name="__nonexistent_var_xyz__",
-            new_name="new_name"
+            function_name="helper_add", variable_name="__nonexistent_var_xyz__", new_name="new_name"
         )
         assert_not_ok(result)
 
     def test_retype_variable_nonexistent_var(self):
         """retype_variable should handle nonexistent variable."""
         result = binja_mcp_bridge.retype_variable(
-            function_name="helper_add",
-            variable_name="__nonexistent_var_xyz__",
-            type_str="int"
+            function_name="helper_add", variable_name="__nonexistent_var_xyz__", type_str="int"
         )
         assert_not_ok(result)
 
     def test_rename_multi_variables_invalid_json(self):
         """rename_multi_variables should handle invalid JSON."""
         result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="helper_add",
-            mapping_json="this is not valid json"
+            function_identifier="helper_add", mapping_json="this is not valid json"
         )
         assert result["ok"] is False
 
     def test_rename_multi_variables_empty_mapping(self):
         """rename_multi_variables should handle empty mapping."""
         result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="helper_add",
-            mapping_json="{}"
+            function_identifier="helper_add", mapping_json="{}"
         )
         assert_not_ok(result)
 
     def test_rename_multi_variables_no_input(self):
         """rename_multi_variables should fail without mapping or pairs."""
-        result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="helper_add"
-        )
+        result = binja_mcp_bridge.rename_multi_variables(function_identifier="helper_add")
         assert result["ok"] is False
 
 
@@ -1716,7 +1761,7 @@ class TestRobustnessPatchBytes:
         patch_result = binja_mcp_bridge.patch_bytes(
             address=addr,
             data="ZZZZ",  # Not valid hex
-            save_to_file=False
+            save_to_file=False,
         )
         assert_not_ok(patch_result)
 
@@ -1727,11 +1772,7 @@ class TestRobustnessPatchBytes:
             pytest.skip("No functions available")
 
         addr = result["functions"][0]["address"]
-        patch_result = binja_mcp_bridge.patch_bytes(
-            address=addr,
-            data="",
-            save_to_file=False
-        )
+        patch_result = binja_mcp_bridge.patch_bytes(address=addr, data="", save_to_file=False)
         assert_not_ok(patch_result)
 
     def test_patch_bytes_odd_length_hex(self):
@@ -1744,7 +1785,7 @@ class TestRobustnessPatchBytes:
         patch_result = binja_mcp_bridge.patch_bytes(
             address=addr,
             data="ABC",  # Odd length
-            save_to_file=False
+            save_to_file=False,
         )
         assert_not_ok(patch_result)
 
@@ -1754,10 +1795,7 @@ class TestRobustnessILViews:
 
     def test_get_il_invalid_view(self):
         """get_il should handle invalid view name."""
-        result = binja_mcp_bridge.get_il(
-            name_or_address="helper_add",
-            view="invalid_view_xyz"
-        )
+        result = binja_mcp_bridge.get_il(name_or_address="helper_add", view="invalid_view_xyz")
         assert_ok(result)
         assert "il" in result
 
@@ -1782,26 +1820,20 @@ class TestRobustnessDataOperations:
 
     def test_rename_data_invalid_address(self):
         """rename_data should handle invalid address."""
-        result = binja_mcp_bridge.rename_data(
-            address="0xDEADBEEFDEADBEEF",
-            new_name="test_name"
-        )
+        result = binja_mcp_bridge.rename_data(address="0xDEADBEEFDEADBEEF", new_name="test_name")
         assert_not_ok(result)
         assert result.get("success") is False
 
     def test_hexdump_data_nonexistent_symbol(self):
         """hexdump_data should handle nonexistent symbol name."""
         result = binja_mcp_bridge.hexdump_data(
-            name_or_address="__nonexistent_symbol_xyz__",
-            length=16
+            name_or_address="__nonexistent_symbol_xyz__", length=16
         )
         assert_not_ok(result)
 
     def test_get_data_decl_nonexistent(self):
         """get_data_decl should handle nonexistent symbol."""
-        result = binja_mcp_bridge.get_data_decl(
-            name_or_address="__nonexistent_symbol_xyz__"
-        )
+        result = binja_mcp_bridge.get_data_decl(name_or_address="__nonexistent_symbol_xyz__")
         assert_not_ok(result)
 
 

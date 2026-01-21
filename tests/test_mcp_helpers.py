@@ -1,6 +1,5 @@
 """Unit tests for MCP bridge helper functions."""
 
-
 from binary_ninja_mcp.bridge import binja_mcp_bridge
 
 
@@ -19,9 +18,7 @@ class TestMcpResult:
         assert result["error"] == "bad"
 
     def test_includes_extra_payload(self):
-        result = binja_mcp_bridge._mcp_result(
-            ok=True, file="test.bin", address="0x1000", count=5
-        )
+        result = binja_mcp_bridge._mcp_result(ok=True, file="test.bin", address="0x1000", count=5)
         assert result["ok"] is True
         assert result["address"] == "0x1000"
         assert result["count"] == 5
@@ -68,9 +65,7 @@ class TestMcpFromJson:
 
     def test_uses_request_info_parameter(self):
         data = {"error": "failed"}
-        out = binja_mcp_bridge._mcp_from_json(
-            data, file="a.bin", request_info={"query": "test"}
-        )
+        out = binja_mcp_bridge._mcp_from_json(data, file="a.bin", request_info={"query": "test"})
         assert out["request"] == {"query": "test"}
 
     def test_detects_error_from_success_false(self):

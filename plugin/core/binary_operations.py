@@ -371,9 +371,7 @@ class BinaryOperations:
                 containing = []
             if containing:
                 func = containing[0]
-                bn.log_info(
-                    f"Found function containing address {hex(addr)}: {func.name}"
-                )
+                bn.log_info(f"Found function containing address {hex(addr)}: {func.name}")
                 return func
 
         # Handle name-based lookup with case sensitivity

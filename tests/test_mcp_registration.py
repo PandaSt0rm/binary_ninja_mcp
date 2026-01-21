@@ -17,4 +17,3 @@ def test_mcp_registers_async_tool_wrappers():
     tool = binja_mcp_bridge.mcp._tool_manager.get_tool("list_methods")
     assert tool is not None
     assert tool.is_async is True
-

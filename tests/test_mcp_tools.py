@@ -753,8 +753,7 @@ class TestRenameMultiVariables:
         )
 
         result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="main",
-            mapping_json='{"var_8": "counter", "var_c": "index"}'
+            function_identifier="main", mapping_json='{"var_8": "counter", "var_c": "index"}'
         )
 
         assert result["ok"] is True
@@ -775,8 +774,7 @@ class TestRenameMultiVariables:
         )
 
         result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="main",
-            pairs="var_8:counter,var_c:index"
+            function_identifier="main", pairs="var_8:counter,var_c:index"
         )
 
         assert result["ok"] is True
@@ -789,8 +787,7 @@ class TestRenameMultiVariables:
 
     def test_rejects_invalid_json(self):
         result = binja_mcp_bridge.rename_multi_variables(
-            function_identifier="main",
-            mapping_json="not valid json"
+            function_identifier="main", mapping_json="not valid json"
         )
 
         assert result["ok"] is False
@@ -1634,8 +1631,6 @@ class TestPatchBytes:
             status=200,
         )
 
-        result = binja_mcp_bridge.patch_bytes(
-            address="0x401000", data="90", save_to_file=False
-        )
+        result = binja_mcp_bridge.patch_bytes(address="0x401000", data="90", save_to_file=False)
 
         assert result["ok"] is True

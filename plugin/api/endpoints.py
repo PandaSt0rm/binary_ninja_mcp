@@ -695,7 +695,9 @@ class BinaryNinjaEndpoints:
                         if hasattr(function, "create_user_var") and hasattr(variable, "storage"):
                             function.create_user_var(variable, t, name)
                         else:
-                            raise ValueError("Retyping not supported by this Binary Ninja API version")
+                            raise ValueError(
+                                "Retyping not supported by this Binary Ninja API version"
+                            )
                     except Exception as e:
                         raise ValueError(f"Failed to set variable type: {e!s}")
 
