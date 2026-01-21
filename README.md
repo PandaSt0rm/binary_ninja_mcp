@@ -103,9 +103,28 @@ For other MCP clients, this is an example config:
 }
 ```
 
+Local checkout without uv/uvx (use your venv Python and point PYTHONPATH at the repo's src):
+
+```json
+{
+    "mcpServers": {
+        "binary_ninja_mcp": {
+            "command": "/ABSOLUTE/PATH/TO/.venv/bin/python3",
+            "args": [
+                "-m",
+                "binary_ninja_mcp.bridge.binja_mcp_bridge"
+            ],
+            "env": {
+                "PYTHONPATH": "/ABSOLUTE/PATH/TO/src"
+            }
+        }
+    }
+}
+```
+
 The bridge honors `BINARY_NINJA_MCP_URL` (or `BINARY_NINJA_MCP_HOST` / `BINARY_NINJA_MCP_PORT`) if you need to point at a non-default Binary Ninja server.
 
-Note: Replace `/ABSOLUTE/PATH/TO` with the actual absolute path to your project directory. The virtual environment's Python interpreter must be used to access the installed dependencies.
+Note: Replace `/ABSOLUTE/PATH/TO` with the actual absolute path to your project directory. The virtual environment's Python interpreter must be used to access the installed dependencies, and `PYTHONPATH` must include the repo's `src` directory for local checkouts.
 
 ## Usage
 

@@ -119,7 +119,7 @@ def _ensure_plugin_venv(plugin_root: Path) -> str:
             if sys.platform == "darwin" and _looks_like_binja_embedded(py):
                 return sys.executable
             # Best-effort deps
-            req = plugin_root / "bridge" / "requirements.txt"
+            req = plugin_root / "src" / "binary_ninja_mcp" / "bridge" / "requirements.txt"
             if req.exists():
                 try:
                     subprocess.run(
@@ -153,14 +153,15 @@ def setup_claude_desktop():
         # Use the installed plugin path (works for Plugin Manager installs):
         # <BinaryNinja>/repositories/community/plugins/CX330Blake_binary_ninja_mcp
         plugin_root = Path(__file__).resolve().parent.parent
-        src_dir = plugin_root / "bridge"
+        src_dir = plugin_root / "src"
 
         if "mcpServers" not in config:
             config["mcpServers"] = {}
 
         config["mcpServers"]["binary_ninja_mcp"] = {
             "command": _ensure_plugin_venv(plugin_root),
-            "args": [str(src_dir / "binja_mcp_bridge.py")],
+            "args": ["-m", "binary_ninja_mcp.bridge.binja_mcp_bridge"],
+            "env": {"PYTHONPATH": str(src_dir)},
         }
 
         with open(config_path, "w") as f:

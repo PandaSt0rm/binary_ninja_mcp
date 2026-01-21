@@ -44,7 +44,7 @@ markers = [
 ]
 
 [tool.setuptools]
-package-dir = {"binary_ninja_mcp" = "."}
+package-dir = {"" = "src"}
 packages = [
     "binary_ninja_mcp",
     "binary_ninja_mcp.bridge",

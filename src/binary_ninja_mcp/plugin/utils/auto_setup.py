@@ -7,13 +7,18 @@ from binary_ninja_mcp.config import SERVER_NAME, build_mcp_server_config, resolv
 from .python_detection import copy_python_env, create_venv_with_system_python, get_python_executable
 
 
-def _repo_root() -> str:
-    # plugin/utils/auto_setup.py -> plugin/utils -> plugin -> repo_root
+def _package_root() -> str:
+    # plugin/utils/auto_setup.py -> plugin/utils -> plugin -> binary_ninja_mcp
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
-def _bridge_entrypoint() -> str:
-    return os.path.join(_repo_root(), "bridge", "binja_mcp_bridge.py")
+def _repo_root() -> str:
+    # plugin/utils/auto_setup.py -> plugin/utils -> plugin -> binary_ninja_mcp -> src -> repo_root
+    return os.path.abspath(os.path.join(_package_root(), "..", ".."))
+
+
+def _bridge_module_args() -> list[str]:
+    return ["-m", "binary_ninja_mcp.bridge.binja_mcp_bridge"]
 
 
 def _sentinel_path() -> str:
@@ -49,7 +54,7 @@ def _ensure_local_venv() -> str:
     on failure.
     """
     vdir = _venv_dir()
-    req = os.path.join(_repo_root(), "bridge", "requirements.txt")
+    req = os.path.join(_package_root(), "bridge", "requirements.txt")
 
     try:
         py = create_venv_with_system_python(vdir, req if os.path.exists(req) else None)
@@ -193,7 +198,7 @@ def install_mcp_clients(quiet: bool = True) -> int:
 
     env: dict[str, str] = {}
     copy_python_env(env)
-    bridge = _bridge_entrypoint()
+    bridge_args = _bridge_module_args()
     command = _ensure_local_venv()
     server_url = resolve_server_url()
     prefer_uv = _prefer_uv()
@@ -239,7 +244,7 @@ def install_mcp_clients(quiet: bool = True) -> int:
             server_url=server_url,
             env=merged_env,
             fallback_command=command,
-            fallback_args=[bridge],
+            fallback_args=bridge_args,
         )
 
         try:

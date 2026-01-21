@@ -55,6 +55,24 @@ def uv_command(*, dev: bool = False, repo_root: str | None = None) -> tuple[str,
     return cmd, ["--from", f"git+{GITHUB_REPO}", "binary-ninja-mcp"]
 
 
+def _ensure_pythonpath(env_out: dict, repo_root: str | None) -> None:
+    if not repo_root:
+        return
+    src_root = Path(repo_root) / "src"
+    if not src_root.exists():
+        return
+    src_str = str(src_root)
+    existing = env_out.get("PYTHONPATH") or os.environ.get("PYTHONPATH")
+    if existing:
+        parts = existing.split(os.pathsep)
+        if src_str not in parts:
+            env_out["PYTHONPATH"] = os.pathsep.join([src_str, *parts])
+        else:
+            env_out["PYTHONPATH"] = existing
+    else:
+        env_out["PYTHONPATH"] = src_str
+
+
 def build_mcp_server_config(
     *,
     prefer_uv: bool = True,
@@ -81,13 +99,13 @@ def build_mcp_server_config(
     if command is None:
         command = fallback_command or sys.executable
         if fallback_args is None:
-            fallback_args = [
-                str(Path(__file__).resolve().parent / "bridge" / "binja_mcp_bridge.py")
-            ]
+            fallback_args = ["-m", "binary_ninja_mcp.bridge.binja_mcp_bridge"]
         if isinstance(fallback_args, (str, Path)):
             args = [str(fallback_args)]
         else:
-            args = list(fallback_args)
+            args = [str(arg) for arg in fallback_args]
+        repo_root = repo_root or _auto_repo_root()
+        _ensure_pythonpath(env_out, repo_root)
 
     config = {"command": command, "args": args, "timeout": timeout, "disabled": False}
     if env_out:

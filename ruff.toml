@@ -15,9 +15,9 @@ ignore = [
 ]
 
 [lint.isort]
-known-first-party = ["binary_ninja_mcp", "plugin", "bridge"]
+known-first-party = ["binary_ninja_mcp"]
 
 [lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py files
 "scripts/*" = ["T201"]    # Allow print statements in scripts
-"bridge/binja_mcp_bridge.py" = ["E402"]  # Imports after exception hook setup (intentional)
+"src/binary_ninja_mcp/bridge/binja_mcp_bridge.py" = ["E402"]  # Imports after exception hook setup (intentional)

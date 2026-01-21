@@ -1,7 +1,15 @@
 """Shared pytest fixtures for MCP bridge testing."""
 
+import sys
+from pathlib import Path
+
 import pytest
 import responses
+
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
+if _SRC.exists() and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 # Default test server URL
 TEST_SERVER_URL = "http://localhost:9009"

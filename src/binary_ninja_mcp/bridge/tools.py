@@ -1,406 +1,40 @@
-import argparse as _argparse
-import functools as _functools
+from __future__ import annotations
+
 import json as _json
-import os as _os
-import re as _re
-import sys as _sys
-import time as _time
-import traceback as _tb
-import urllib.parse as _urllib_parse
-from pathlib import Path as _Path
 
-
-# Install a very-early excepthook so any ImportError at module import time is captured.
-def _bridge_excepthook(exc_type, exc, tb):
-    # Print to stderr for interactive runs
-    _tb.print_exception(exc_type, exc, tb, file=_sys.stderr)
-
-
-_sys.excepthook = _bridge_excepthook
-
-import anyio
-import requests
-from mcp.server.fastmcp import FastMCP
-
-try:
-    from binary_ninja_mcp.config import (
-        SERVER_NAME,
-        build_mcp_server_config,
-        resolve_server_url,
-    )
-except Exception:
-    _here = _Path(__file__).resolve().parent
-    _root = _here.parent
-    if str(_root) not in _sys.path:
-        _sys.path.insert(0, str(_root))
-    from config import SERVER_NAME, build_mcp_server_config, resolve_server_url
-
-binja_server_url = resolve_server_url()
-mcp = FastMCP("binja-mcp")
-
-
-def tool(**tool_kwargs):
-    """Register a sync function as an MCP tool without blocking the event loop."""
-
-    def decorator(fn):
-        cfg = dict(tool_kwargs)
-        cfg.setdefault("name", fn.__name__)
-        cfg.setdefault("description", fn.__doc__ or "")
-
-        @mcp.tool(**cfg)
-        @_functools.wraps(fn)
-        async def _wrapper(*args, **kwargs):  # pragma: no cover - exercised via MCP runtime
-            return await _run_in_thread(fn, *args, **kwargs)
-
-        return fn
-
-    return decorator
-
-
-def _set_server_url(url: str):
-    global binja_server_url
-    binja_server_url = url
-
-
-def _float_env(name: str, default: float) -> float:
-    raw = _os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except Exception:
-        return default
-
-
-def _retry_max_wait() -> float:
-    return _float_env("BINARY_NINJA_MCP_RETRY_MAX_WAIT", 20.0)
-
-
-def _retry_after_default() -> float:
-    return _float_env("BINARY_NINJA_MCP_RETRY_AFTER", 5.0)
-
-
-def _status_timeout() -> float:
-    return _float_env("BINARY_NINJA_MCP_STATUS_TIMEOUT", 3.0)
-
-
-def _long_timeout() -> float:
-    return _float_env("BINARY_NINJA_MCP_LONG_TIMEOUT", 120.0)
-
-
-async def _run_in_thread(func, /, *args, **kwargs):
-    return await anyio.to_thread.run_sync(
-        _functools.partial(func, *args, **kwargs),
-        abandon_on_cancel=True,
-    )
-
-
-def _parse_retry_after(response) -> float:
-    header = response.headers.get("Retry-After")
-    if header:
-        try:
-            value = float(header)
-            return max(0.0, value)
-        except Exception:
-            pass
-    return _retry_after_default()
-
-
-def _request_with_retry(
-    method: str,
-    url: str,
-    *,
-    data=None,
-    timeout: float | None = None,
-):
-    max_wait = _retry_max_wait()
-    deadline = None
-    if max_wait > 0:
-        deadline = _time.monotonic() + max_wait
-    while True:
-        if timeout is None:
-            response = requests.request(method, url, data=data)
-        else:
-            response = requests.request(method, url, data=data, timeout=timeout)
-        response.encoding = "utf-8"
-        if response.status_code != 503:
-            return response
-        if deadline is None:
-            return response
-        remaining = deadline - _time.monotonic()
-        if remaining <= 0:
-            return response
-        wait = min(_parse_retry_after(response), remaining)
-        if wait > 0:
-            _time.sleep(wait)
-        else:
-            _time.sleep(0.1)
-
-
-def _active_filename() -> str:
-    """Return the currently active filename as known by the server."""
-    try:
-        st = get_json("status", timeout=_status_timeout())
-        if isinstance(st, dict) and st.get("filename"):
-            return str(st.get("filename"))
-    except Exception:
-        pass
-    return "(none)"
-
-
-def _mcp_result(*, ok: bool, file: str | None = None, **payload: object) -> dict:
-    """Standard MCP tool response envelope.
-
-    All tools return a JSON-serializable dict with:
-    - ok: boolean success flag
-    - file: active filename (best-effort)
-    - tool-specific payload fields
-    """
-
-    out: dict[str, object] = {"ok": ok, **payload}
-    out.setdefault("file", file or _active_filename())
-    return out
-
-
-def _mcp_from_json(
-    data: object,
-    *,
-    file: str | None = None,
-    request_info: object | None = None,
-    **payload: object,
-) -> dict:
-    # We treat any caller-provided payload as request context, but only include it on errors.
-    request_context: object | None
-    if request_info is not None:
-        request_context = request_info
-    elif payload:
-        request_context = dict(payload)
-    else:
-        request_context = None
-
-    if data is None:
-        out: dict[str, object] = {"error": "No response from server"}
-        if request_context is not None:
-            out["request"] = request_context
-        return _mcp_result(ok=False, file=file, **out)
-
-    if isinstance(data, dict):
-        if "error" in data:
-            ok = False
-        elif isinstance(data.get("success"), bool):
-            ok = bool(data.get("success"))
-        else:
-            ok = True
-
-        # Strip reserved envelope keys to prevent accidental clashes.
-        out = dict(data)
-        out.pop("ok", None)
-        out.pop("file", None)
-
-        if not ok and request_context is not None:
-            out["request"] = request_context
-
-        return _mcp_result(ok=ok, file=file, **out)
-
-    # Non-dict responses are treated as success; keep output lean.
-    return _mcp_result(ok=True, file=file, raw=data)
-
-
-def _mcp_from_text(
-    text: str | None, *, file: str | None = None, key: str = "text", **payload: object
-) -> dict:
-    if text is None:
-        return _mcp_result(ok=False, file=file, error="No response from server", **payload)
-    stripped = str(text).strip()
-    if stripped.startswith(("Error ", "Request failed")):
-        return _mcp_result(ok=False, file=file, error=stripped, **payload)
-
-    merged = dict(payload)
-    merged[key] = stripped
-    return _mcp_result(ok=True, file=file, **merged)
-
-
-def _mcp_from_list(
-    items: list | None, *, file: str | None = None, key: str = "items", **payload: object
-) -> dict:
-    if items is None:
-        return _mcp_result(ok=False, file=file, error="No response from server", **payload)
-
-    merged = dict(payload)
-    merged[key] = items
-    return _mcp_result(ok=True, file=file, **merged)
-
-
-def _is_int_like(text: str) -> bool:
-    """Best-effort integer detection for routing params (name vs address)."""
-    s = (text or "").strip()
-    if not s:
-        return False
-    if s[0] in "+-":
-        s = s[1:].strip()
-    if not s:
-        return False
-
-    lowered = s.lower()
-    if lowered.startswith(("dec:", "decimal:", "d:")):
-        body = s.split(":", 1)[1].strip()
-        return _re.fullmatch(r"[0-9_]+", body) is not None
-
-    if lowered.startswith(("hex:", "h:")):
-        body = s.split(":", 1)[1].strip()
-        return _re.fullmatch(r"[0-9a-fA-F_]+", body) is not None
-
-    if lowered.startswith("0x"):
-        return _re.fullmatch(r"[0-9a-fA-F_]+", s[2:]) is not None
-    if lowered.startswith("0b"):
-        return _re.fullmatch(r"[01_]+", s[2:]) is not None
-    if lowered.startswith("0o"):
-        return _re.fullmatch(r"[0-7_]+", s[2:]) is not None
-
-    if lowered.endswith("h") and _re.fullmatch(r"[0-9a-f_]+h", lowered):
-        return True
-
-    if _re.fullmatch(r"[0-9_]+", s):
-        return True
-    if _re.fullmatch(r"[0-9a-fA-F_]+", s):
-        return True
-
-    return False
-
-
-def safe_get(endpoint: str, params: dict | None = None, timeout: float | None = 20) -> list:
-    """
-    Perform a GET request. If 'params' is given, we convert it to a query string.
-    """
-    if params is None:
-        params = {}
-    query_string = _urllib_parse.urlencode(params, doseq=True)
-    url = f"{binja_server_url}/{endpoint}"
-    if query_string:
-        url += "?" + query_string
-
-    try:
-        response = _request_with_retry("GET", url, timeout=timeout)
-        if response.ok:
-            return response.text.splitlines()
-        return [f"Error {response.status_code}: {response.text.strip()}"]
-    except Exception as e:
-        return [f"Request failed: {e!s}"]
-
-
-def get_json(endpoint: str, params: dict | None = None, timeout: float | None = 20):
-    """
-    Perform a GET and return parsed JSON.
-    - On 2xx: returns parsed JSON.
-    - On 4xx/5xx: attempts to parse JSON body and return it; if not JSON, returns {'error': 'Error <code>: <text>'}.
-    Returns None only on transport errors.
-    """
-    if params is None:
-        params = {}
-    query_string = _urllib_parse.urlencode(params, doseq=True)
-    url = f"{binja_server_url}/{endpoint}"
-    if query_string:
-        url += "?" + query_string
-    try:
-        response = _request_with_retry("GET", url, timeout=timeout)
-        # Try to parse JSON regardless of status
-        try:
-            data = response.json()
-        except Exception:
-            data = None
-        if response.ok:
-            return data
-        # Non-OK: return parsed error object if available; otherwise synthesize one
-        if isinstance(data, dict):
-            # Ensure at least an error field for LLMs
-            if "error" not in data:
-                data = {"error": str(data)}
-            data.setdefault("status", response.status_code)
-            return data
-        text = (response.text or "").strip()
-        return {"error": f"Error {response.status_code}: {text}"}
-    except Exception as e:
-        return {"error": f"Request failed: {e!s}"}
-
-
-def post_json(endpoint: str, data: dict | str | None = None, timeout: float | None = 20):
-    """Perform a POST and return parsed JSON.
-
-    Mirrors get_json() behavior for error handling.
-    """
-    url = f"{binja_server_url}/{endpoint}"
-    try:
-        response = _request_with_retry("POST", url, data=data, timeout=timeout)
-        try:
-            parsed = response.json()
-        except Exception:
-            parsed = None
-        if response.ok:
-            return parsed
-        if isinstance(parsed, dict):
-            if "error" not in parsed:
-                parsed = {"error": str(parsed)}
-            parsed.setdefault("status", response.status_code)
-            return parsed
-        text = (response.text or "").strip()
-        return {"error": f"Error {response.status_code}: {text}"}
-    except Exception as e:
-        return {"error": f"Request failed: {e!s}"}
-
-
-def get_text(endpoint: str, params: dict | None = None, timeout: float | None = 20) -> str:
-    """Perform a GET and return raw text (or an error string)."""
-    if params is None:
-        params = {}
-    query_string = _urllib_parse.urlencode(params, doseq=True)
-    url = f"{binja_server_url}/{endpoint}"
-    if query_string:
-        url += "?" + query_string
-    try:
-        response = _request_with_retry("GET", url, timeout=timeout)
-        if response.ok:
-            return response.text
-        return f"Error {response.status_code}: {response.text.strip()}"
-    except Exception as e:
-        return f"Request failed: {e!s}"
-
-
-def safe_post(endpoint: str, data: dict | str) -> str:
-    try:
-        if isinstance(data, dict):
-            response = _request_with_retry(
-                "POST", f"{binja_server_url}/{endpoint}", data=data, timeout=20
-            )
-        else:
-            response = _request_with_retry(
-                "POST",
-                f"{binja_server_url}/{endpoint}",
-                data=data.encode("utf-8"),
-                timeout=20,
-            )
-        if response.ok:
-            return response.text.strip()
-        return f"Error {response.status_code}: {response.text.strip()}"
-    except Exception as e:
-        return f"Request failed: {e!s}"
+from .http_client import (
+    get_json,
+    get_text,
+    post_json,
+)
+from .http_client import (
+    long_timeout as _long_timeout,
+)
+from .http_client import (
+    status_timeout as _status_timeout,
+)
+from .runtime import tool
+from .tool_helpers import (
+    _active_filename,
+    _fetch_paginated_list,
+    _is_int_like,
+    _mcp_from_json,
+    _mcp_from_text,
+    _mcp_result,
+)
 
 
 @tool()
 def list_methods(offset: int = 0, limit: int = 100) -> dict:
     """List all function names in the program with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("methods", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=limit,
-            functions=data.get("functions", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "methods",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="functions",
+    )
 
 
 @tool()
@@ -498,19 +132,14 @@ def define_types(c_code: str) -> dict:
 @tool()
 def list_classes(offset: int = 0, limit: int = 100) -> dict:
     """List all namespace/class names in the program with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("classes", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=limit,
-            classes=data.get("classes", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "classes",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="classes",
+    )
 
 
 @tool()
@@ -650,73 +279,54 @@ def get_function_comment(function_name: str) -> dict:
 @tool()
 def list_segments(offset: int = 0, limit: int = 100) -> dict:
     """List all memory segments in the program with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("segments", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=limit,
-            segments=data.get("segments", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "segments",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="segments",
+    )
 
 
 @tool()
 def list_sections(offset: int = 0, limit: int = 100) -> dict:
     """List sections in the program with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("sections", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=limit,
-            sections=data.get("sections", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "sections",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="sections",
+    )
 
 
 @tool()
 def list_imports(offset: int = 0, limit: int = 100) -> dict:
     """List imported symbols in the program with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("imports", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=limit,
-            imports=data.get("imports", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "imports",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="imports",
+    )
 
 
 @tool()
 def list_strings(offset: int = 0, count: int = 100) -> dict:
     """List strings in the database (paginated)."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": count}
-    data = get_json("strings", params, timeout=_long_timeout())
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=count,
-            strings=data.get("strings", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "strings",
+        file=file,
+        offset=offset,
+        limit=count,
+        result_key="strings",
+        timeout=_long_timeout(),
+    )
 
 
 @tool()
@@ -742,24 +352,18 @@ def list_strings_filter(offset: int = 0, count: int = 100, filter: str = "") -> 
 @tool()
 def list_local_types(offset: int = 0, count: int = 200, include_libraries: bool = False) -> dict:
     """List local types in the database (paginated)."""
-
     file = _active_filename()
-    params = {
-        "offset": offset,
-        "limit": count,
-        "includeLibraries": int(bool(include_libraries)),
-    }
-    data = get_json("localTypes", params, timeout=_long_timeout())
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=count,
-            includeLibraries=bool(include_libraries),
-            types=data.get("types", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    params = {"includeLibraries": int(bool(include_libraries))}
+    return _fetch_paginated_list(
+        "localTypes",
+        file=file,
+        offset=offset,
+        limit=count,
+        result_key="types",
+        params=params,
+        timeout=_long_timeout(),
+        extra_payload={"includeLibraries": bool(include_libraries)},
+    )
 
 
 @tool()
@@ -804,51 +408,40 @@ def list_all_strings() -> dict:
 @tool()
 def list_exports(offset: int = 0, limit: int = 100) -> dict:
     """List exported functions/symbols with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("exports", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=limit,
-            exports=data.get("exports", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "exports",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="exports",
+    )
 
 
 @tool()
 def list_namespaces(offset: int = 0, limit: int = 100) -> dict:
     """List all non-global namespaces in the program with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("namespaces", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True,
-            file=file,
-            offset=offset,
-            limit=limit,
-            namespaces=data.get("namespaces", []) or [],
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "namespaces",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="namespaces",
+    )
 
 
 @tool()
 def list_data_items(offset: int = 0, limit: int = 100) -> dict:
     """List defined data labels and their values with pagination."""
-
     file = _active_filename()
-    params = {"offset": offset, "limit": limit}
-    data = get_json("data", params)
-    if isinstance(data, dict) and "error" not in data:
-        return _mcp_result(
-            ok=True, file=file, offset=offset, limit=limit, data=data.get("data", []) or []
-        )
-    return _mcp_from_json(data, file=file, **params)
+    return _fetch_paginated_list(
+        "data",
+        file=file,
+        offset=offset,
+        limit=limit,
+        result_key="data",
+    )
 
 
 @tool()
@@ -1114,53 +707,59 @@ def patch_bytes(address: str, data: str, save_to_file: bool = True) -> dict:
     return _mcp_from_json(result, file=file, request_info=params)
 
 
-def _config_json(prefer_uv: bool, dev: bool, server_url: str) -> str:
-    cfg = build_mcp_server_config(
-        prefer_uv=prefer_uv,
-        dev=dev,
-        repo_root=str(_Path(__file__).resolve().parent.parent),
-        server_url=server_url,
-        fallback_command=_sys.executable,
-        fallback_args=[_Path(__file__).resolve()],
-    )
-    return _json.dumps({"mcpServers": {SERVER_NAME: cfg}}, indent=2)
-
-
-def main(argv: list[str] | None = None):
-    parser = _argparse.ArgumentParser(description="Binary Ninja MCP bridge (MCP stdio server)")
-    parser.add_argument(
-        "--server", help="Binary Ninja MCP HTTP server URL (default: env or http://127.0.0.1:9009)"
-    )
-    parser.add_argument("--host", help="Binary Ninja MCP HTTP server host")
-    parser.add_argument("--port", type=int, help="Binary Ninja MCP HTTP server port")
-    parser.add_argument(
-        "--config", action="store_true", help="Print MCP client config JSON and exit"
-    )
-    parser.add_argument(
-        "--dev", action="store_true", help="Emit config that uses 'uv run' from the repo root"
-    )
-    parser.add_argument(
-        "--no-uv", action="store_true", help="Disable uv/uvx preference when generating config"
-    )
-    args = parser.parse_args(argv)
-
-    server_url = resolve_server_url(args.server, args.host, args.port)
-    _set_server_url(server_url)
-
-    if args.config:
-        print(_config_json(not args.no_uv, args.dev, server_url))
-        return
-
-    # Important: write any logs to stderr to avoid corrupting MCP stdio JSON-RPC
-    print(f"Starting MCP bridge service (Binary Ninja at {server_url})...", file=_sys.stderr)
-    try:
-        mcp.run()
-    except (KeyboardInterrupt, EOFError):
-        pass
-    except Exception as _e:
-        _bridge_excepthook(type(_e), _e, _e.__traceback__)
-        raise
-
-
-if __name__ == "__main__":
-    main()
+__all__ = [
+    "convert_number",
+    "declare_c_type",
+    "decompile_function",
+    "define_types",
+    "delete_comment",
+    "delete_function_comment",
+    "fetch_disassembly",
+    "format_value",
+    "function_at",
+    "get_binary_status",
+    "get_comment",
+    "get_data_decl",
+    "get_entry_points",
+    "get_function_comment",
+    "get_il",
+    "get_stack_frame_vars",
+    "get_type_info",
+    "get_user_defined_type",
+    "get_xrefs_to",
+    "get_xrefs_to_enum",
+    "get_xrefs_to_field",
+    "get_xrefs_to_struct",
+    "get_xrefs_to_type",
+    "get_xrefs_to_union",
+    "hexdump_address",
+    "hexdump_data",
+    "list_all_strings",
+    "list_binaries",
+    "list_classes",
+    "list_data_items",
+    "list_exports",
+    "list_imports",
+    "list_local_types",
+    "list_methods",
+    "list_namespaces",
+    "list_platforms",
+    "list_sections",
+    "list_segments",
+    "list_strings",
+    "list_strings_filter",
+    "make_function_at",
+    "patch_bytes",
+    "rename_data",
+    "rename_function",
+    "rename_multi_variables",
+    "rename_single_variable",
+    "retype_variable",
+    "search_functions_by_name",
+    "search_types",
+    "select_binary",
+    "set_comment",
+    "set_function_comment",
+    "set_function_prototype",
+    "set_local_variable_type",
+]

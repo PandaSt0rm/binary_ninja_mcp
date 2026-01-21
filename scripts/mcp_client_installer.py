@@ -2,30 +2,24 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src"
+if _SRC.exists() and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 # Import shared utilities
-try:
-    # Try relative import first (when run as module)
-    from ..plugin.utils.python_detection import (
-        copy_python_env,
-        create_venv_with_system_python,
-        get_python_executable,
-    )
-except ImportError:
-    # Fallback for direct script execution
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "plugin"))
-    from utils.python_detection import (
-        copy_python_env,
-        create_venv_with_system_python,
-        get_python_executable,
-    )
-
-try:
-    from ..config import SERVER_NAME, build_mcp_server_config, resolve_server_url
-except ImportError:
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-    from config import SERVER_NAME, build_mcp_server_config, resolve_server_url
-
+from binary_ninja_mcp.config import (  # noqa: E402
+    SERVER_NAME,
+    build_mcp_server_config,
+    resolve_server_url,
+)
+from binary_ninja_mcp.plugin.utils.python_detection import (  # noqa: E402
+    copy_python_env,
+    create_venv_with_system_python,
+    get_python_executable,
+)
 
 MCP_SERVER_KEY = SERVER_NAME
 
@@ -35,8 +29,8 @@ def _repo_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 
-def _bridge_entrypoint() -> str:
-    return os.path.join(_repo_root(), "bridge", "binja_mcp_bridge.py")
+def _bridge_module_args() -> list[str]:
+    return ["-m", "binary_ninja_mcp.bridge.binja_mcp_bridge"]
 
 
 def _venv_dir() -> str:
@@ -57,7 +51,7 @@ def _venv_python() -> str:
 def ensure_local_venv() -> str:
     """Create a local venv under the plugin root if missing and return its python."""
     vdir = _venv_dir()
-    req = os.path.join(_repo_root(), "bridge", "requirements.txt")
+    req = os.path.join(_repo_root(), "src", "binary_ninja_mcp", "bridge", "requirements.txt")
 
     try:
         py = create_venv_with_system_python(vdir, req if os.path.exists(req) else None)
@@ -81,7 +75,7 @@ def print_mcp_config(*, prefer_uv: bool = True, dev: bool = False, server_url: s
         server_url=server_url,
         env=env,
         fallback_command=python,
-        fallback_args=[_bridge_entrypoint()],
+        fallback_args=_bridge_module_args(),
     )
     print(json.dumps({"mcpServers": {MCP_SERVER_KEY: mcp_config}}, indent=2))
 
@@ -249,7 +243,6 @@ def install_mcp_servers(
                 for key, value in mcp_servers[MCP_SERVER_KEY].get("env", {}).items():
                     env.setdefault(key, value)
 
-            bridge = _bridge_entrypoint()
             if copy_python_env(env) and not quiet:
                 print("[WARNING] Custom Python environment variables detected")
 
@@ -261,7 +254,7 @@ def install_mcp_servers(
                 server_url=server_url,
                 env=env,
                 fallback_command=python,
-                fallback_args=[bridge],
+                fallback_args=_bridge_module_args(),
             )
             mcp_servers[MCP_SERVER_KEY] = server_cfg
 

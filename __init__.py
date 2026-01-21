@@ -1,10 +1,10 @@
-import importlib.util as _importlib
+import sys
+from pathlib import Path
 
-__all__ = ["BinaryNinjaMCP"]
+_ROOT = Path(__file__).resolve().parent
+_SRC = _ROOT / "src"
+if _SRC.exists() and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-# Only import the Binary Ninja plugin when the Binary Ninja Python API is present.
-_bn_spec = _importlib.find_spec("binaryninja")
-if _bn_spec:
-    from .plugin import BinaryNinjaMCP  # type: ignore
-else:
-    BinaryNinjaMCP = None  # type: ignore
+# Load the real package for Binary Ninja plugin registration.
+import binary_ninja_mcp  # noqa: E402

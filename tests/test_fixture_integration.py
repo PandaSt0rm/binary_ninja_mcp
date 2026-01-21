@@ -31,7 +31,7 @@ import time
 
 import pytest
 
-from bridge import binja_mcp_bridge
+from binary_ninja_mcp.bridge import binja_mcp_bridge
 
 SERVER_URL = binja_mcp_bridge.binja_server_url
 READY_TIMEOUT = float(os.environ.get("BINARY_NINJA_MCP_TEST_READY_TIMEOUT", "60"))
